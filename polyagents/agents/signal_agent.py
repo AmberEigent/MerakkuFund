@@ -25,12 +25,17 @@ context. Do not invent facts. Track the money rather than forecasting the event 
 from priors. Return your estimate as structured output."""
 
 
-def _build_prompt(state: dict) -> str:
+def _build_prompt(state: dict, lessons: list[str]) -> str:
     raw = state.get("raw", {})
     factors = (raw.get("features", {}) or {}).get("factors", {})
     price, price_source = effective_market_price(state)
+    memory = ""
+    if lessons:
+        memory = "=== Lessons from past resolved trades (carry-forward) ===\n" + \
+            "\n".join(f"- {l}" for l in lessons) + "\n\n"
     return (
         f"{_SYSTEM}\n\n"
+        f"{memory}"
         f"=== Market ===\n{state.get('market_context', '')}\n\n"
         f"=== Price ===\n{state.get('price_report', '')}\n"
         f"=== Volume ===\n{state.get('volume_report', '')}\n"
@@ -43,11 +48,13 @@ def _build_prompt(state: dict) -> str:
     )
 
 
-def create_signal_agent(llm) -> Node:
+def create_signal_agent(llm, memory=None) -> Node:
+    """``memory`` (a MemoryStore, optional) injects recent lessons into the prompt."""
     structured = llm.with_structured_output(Signal)
 
     def node(state: dict) -> dict[str, Any]:
-        signal: Signal = structured.invoke(_build_prompt(state))
+        lessons = memory.recent_lessons(question=state.get("question")) if memory is not None else []
+        signal: Signal = structured.invoke(_build_prompt(state, lessons))
         report = (
             f"SIGNAL: {signal.direction.upper()} p_true={signal.p_true:.2f} "
             f"({signal.conviction})\n{signal.rationale}"

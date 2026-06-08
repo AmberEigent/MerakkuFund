@@ -31,6 +31,10 @@ from polyagents.execution.clients import (
     PaperExecutionClient,
 )
 from polyagents.execution.portfolio import Portfolio
+from polyagents.feedback.memory import MemoryStore, make_trade_record
+from polyagents.feedback.reflection import reflect_on_outcome
+from polyagents.feedback.report import pnl_report
+from polyagents.feedback.settlement import resolve_winner, resolve_winning_token, settlement_pnl
 
 from .setup import build_analysis_graph, build_data_collection_graph, build_trading_graph
 from .state import build_initial_state
@@ -60,6 +64,9 @@ class PolyAgentsGraph:
         self.portfolio = Portfolio(starting_cash=self.config["bankroll_usdc"])
         self.circuit_breaker = CircuitBreaker(self.config)
         self.execution_client = execution_client or self._default_execution_client()
+
+        # Layer 4 — persistent decision log / memory (feeds lessons back in).
+        self.memory = MemoryStore(self.config["memory_path"])
 
     def _default_execution_client(self) -> ExecutionClient:
         if self.config.get("execution_mode") == "live":
@@ -92,7 +99,7 @@ class PolyAgentsGraph:
         if self._analysis_graph is None:
             self._analysis_graph = build_analysis_graph(
                 self.client, self.news_client, self.config, self._get_llm(),
-                scorer=self.scorer, forecaster=self.forecaster,
+                scorer=self.scorer, forecaster=self.forecaster, memory=self.memory,
             )
         return self._analysis_graph
 
@@ -104,7 +111,7 @@ class PolyAgentsGraph:
             )
             self._trading_graph = build_trading_graph(
                 self.client, self.news_client, self.config, self._get_llm(), execute_node,
-                scorer=self.scorer, forecaster=self.forecaster,
+                scorer=self.scorer, forecaster=self.forecaster, memory=self.memory,
             )
         return self._trading_graph
 
@@ -122,9 +129,51 @@ class PolyAgentsGraph:
 
     def trade(self, market: Market, as_of: str | None = None) -> dict[str, Any]:
         """Layer 1 + 2 + 3: analyse then execute (paper by default) through the
-        circuit breaker; the portfolio persists across calls."""
+        circuit breaker; the portfolio persists across calls. The decision is
+        logged to memory (Layer 4) as a pending record."""
         as_of = as_of or utcnow().isoformat()
-        return self.trading_graph.invoke(build_initial_state(market, as_of))
+        state = self.trading_graph.invoke(build_initial_state(market, as_of))
+        self.memory.record(make_trade_record(state))
+        return state
+
+    # ----- Layer 4: feedback loop -------------------------------------------
+
+    def settle(self) -> list[dict]:
+        """Resolve pending trades whose markets have closed: settle the paper
+        position, book realised P&L, and write a reflection lesson to memory.
+        Returns the records that were settled this pass."""
+        settled: list[dict] = []
+        for rec in self.memory.pending():
+            market_raw = self.client.fetch_market_by_condition(rec["condition_id"])
+            win_token = resolve_winning_token(market_raw or {})
+            if win_token is None:
+                continue                      # not resolved yet
+            won = rec["token_id"] == win_token        # robust: compare token, not label
+            winner = resolve_winner(market_raw or {}) # best-effort label for display
+            pos = self.portfolio.positions.get(rec["token_id"])
+            pnl = ret = None
+            if pos is not None:               # we actually hold it -> settle paper payout
+                cost = pos.cost_basis
+                self.portfolio.apply_sell_close(rec["token_id"], 1.0 if won else 0.0, utcnow())
+                pnl = settlement_pnl(won, pos.shares, pos.avg_price)
+                ret = (pnl / cost) if cost else None
+            updates = {
+                "status": "resolved", "resolved_winner": winner, "won": won,
+                "realized_pnl": pnl, "realized_return": ret,
+            }
+            rec.update(updates)
+            try:
+                lesson = reflect_on_outcome(self._get_llm(), rec)
+                updates["lesson"] = f"{lesson.summary} Next time: {lesson.what_to_change}"
+            except Exception:
+                updates["lesson"] = None
+            self.memory.update(rec["record_id"], **updates)
+            settled.append({**rec, **updates})
+        return settled
+
+    def report(self) -> str:
+        """Aggregate P&L / attribution over the decision log."""
+        return pnl_report(self.memory.all())
 
     def most_active_market(self) -> Market | None:
         """Discovery helper: the single most-active tradeable side right now."""

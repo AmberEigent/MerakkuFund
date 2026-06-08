@@ -78,29 +78,30 @@ class _Structured:
 class FakeLLM:
     """Mimics the bit the agents use: ``with_structured_output(Schema).invoke``."""
 
-    def __init__(self, signal, reflection):
+    def __init__(self, signal, reflection, lesson=None):
         self._signal = signal
         self._reflection = reflection
+        self._lesson = lesson
 
     def with_structured_output(self, schema):
-        from polyagents.agents.schemas import Reflection, Signal
+        from polyagents.agents.schemas import Lesson, Reflection, Signal
 
-        if schema is Signal:
-            return _Structured(self._signal)
-        if schema is Reflection:
-            return _Structured(self._reflection)
+        mapping = {Signal: self._signal, Reflection: self._reflection, Lesson: self._lesson}
+        if schema in mapping and mapping[schema] is not None:
+            return _Structured(mapping[schema])
         raise AssertionError(f"unexpected schema {schema}")
 
 
 @pytest.fixture
 def fake_llm():
-    from polyagents.agents.schemas import Reflection, Signal
+    from polyagents.agents.schemas import Lesson, Reflection, Signal
 
     return FakeLLM(
         signal=Signal(direction="yes", p_true=0.70, conviction="high",
                       rationale="Heavy bid pressure and positive flow."),
         reflection=Reflection(assessment="Reasonable given the flow.",
                               risk_flags=["short price history"], confidence="medium"),
+        lesson=Lesson(summary="Flow signal held up.", what_to_change="Weight near-expiry flow less."),
     )
 
 

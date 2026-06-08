@@ -10,18 +10,23 @@ graph nodes, each node reads it, does its job, and writes a partial update back
 The project is built layer by layer. **Layer 1** (data collection) gathers
 everything about one market into a typed state; **Layer 2** (decision engine)
 turns that into a sized, risk-gated trade; **Layer 3** (execution) fills it on a
-paper (or live CLOB) venue through a circuit breaker. The feedback layer is next.
+paper (or live CLOB) venue through a circuit breaker; **Layer 4** (feedback)
+settles resolved trades, reflects on the realised result, and feeds the lesson
+back into future decisions.
 
 ```
    ── L1: data collection ──┐  ┌── L2: decision engine ──┐  ┌─ L3: execution ─
 START ► … ► features ► signal ► decision ► reflection ► execute ► END
             factor      LLM      Kelly +     LLM self-     paper/live +
             vector      p_true   risk gate   critique      circuit breaker
+                          ▲                                     │
+            L4 feedback   └──── lessons ◄── reflect ◄── settle ─┘  (after resolution)
 ```
 
 `collect(market)` runs Layer 1 only (no LLM/keys); `analyze(market)` adds
 Layer 2 (needs an Anthropic key, or inject an `llm`); `trade(market)` adds
-Layer 3 execution (paper by default — no keys, no real orders).
+Layer 3 execution (paper by default) and logs the decision; `settle()` runs
+Layer 4 once markets resolve.
 
 ### Layer 1 capabilities (tracking the Merakku v3.0 Layer 1 projects)
 
@@ -86,6 +91,31 @@ The portfolio + breaker persist on the `PolyAgentsGraph` across markets. Set
 `execution_mode: "live"` (and `POLYMARKET_PRIVATE_KEY`) to place real orders —
 off by default so nothing trades for real unless you opt in.
 
+### Layer 4 — feedback loop (Merakku v3.0; TradingAgents-style memory)
+
+The learning half: every `trade()` is logged; once a market resolves, `settle()`
+books realised P&L and reflects on it; lessons are injected into future signals.
+
+| Piece | Role | Module |
+|---|---|---|
+| `MemoryStore` | persistent decision log (JSONL at `~/.polyagents/memory/`) | `feedback/memory.py` |
+| settlement | resolve winner from Gamma **by token id** (label-agnostic), pay paper $1/$0 | `feedback/settlement.py` |
+| `reflect_on_outcome` | LLM attribution → a `Lesson` (what worked / what to change) | `feedback/reflection.py` |
+| lesson injection | recent lessons (same-market first) prepended to the signal prompt | `agents/signal_agent.py` |
+| `pnl_report` | hit rate, realised P&L, avg return, decision mix | `feedback/report.py` |
+
+```python
+ta = PolyAgentsGraph()
+ta.trade(market)            # logs a pending record
+# … later, after markets resolve …
+ta.settle()                 # books P&L + writes a reflection lesson per resolved trade
+print(ta.report())          # hit rate / realised P&L / attribution
+```
+
+Settlement keys on the **CLOB token id**, not a YES/NO label, so markets with
+custom outcomes (player/candidate names) settle correctly. Portfolio-optimisation
+seams (Riskfolio-Lib / skfolio) and full Langfuse tracing remain future work.
+
 ### Polymarket docs MCP
 
 The official [Polymarket documentation MCP](https://docs.polymarket.com/mcp) (a
@@ -131,6 +161,11 @@ polyagents/
     circuit_breaker.py     # pre-trade safety gates
     clients.py             # ExecutionClient port + Paper / LiveCLOB adapters
     agent.py               # execution node (decision -> breaker -> venue)
+  feedback/                # Layer 4 — feedback loop
+    memory.py              # persistent decision log + lesson injection source
+    settlement.py          # resolve winner (by token) + paper payout
+    reflection.py          # LLM outcome reflection -> Lesson
+    report.py              # P&L / attribution report
   mcp_tools.py             # load configured MCP servers (Polymarket docs) as LangGraph tools
   graph/
     state.py               # MarketState TypedDict (L1+L2 fields) + initial-state builder

@@ -116,6 +116,29 @@ class PolymarketDataClient:
             offset += GAMMA_PAGE
         return out
 
+    def fetch_market_by_condition(self, condition_id: str) -> dict | None:
+        """Fetch one market by condition id — for settlement.
+
+        Gamma's ``condition_ids`` lookup defaults to active markets, so a
+        resolved market needs an explicit ``closed=true`` retry. Try the open
+        view first, then the closed view.
+        """
+        if not condition_id:
+            return None
+        for extra in ({}, {"closed": "true"}):
+            try:
+                r = self._http.get(
+                    f"{self.gamma_base}/markets",
+                    params={"condition_ids": condition_id, **extra},
+                )
+                r.raise_for_status()
+                data = r.json() or []
+            except Exception:
+                continue
+            if isinstance(data, list) and data:
+                return data[0]
+        return None
+
     def to_markets(self, raw_markets: Iterable[dict]) -> list[Market]:
         """Normalise Gamma payloads into one ``Market`` per outcome side."""
         out: list[Market] = []

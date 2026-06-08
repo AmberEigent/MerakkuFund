@@ -57,6 +57,8 @@ def _apply_env_overrides(config: dict) -> dict:
 DEFAULT_CONFIG = _apply_env_overrides({
     "project_root": str(_PROJECT_ROOT),
     "results_dir": os.getenv("POLYAGENTS_RESULTS_DIR", os.path.join(_POLYAGENTS_HOME, "logs")),
+    # Layer 4 — persistent decision log / memory (JSONL).
+    "memory_path": os.getenv("POLYAGENTS_MEMORY_PATH", os.path.join(_POLYAGENTS_HOME, "memory", "trades.jsonl")),
 
     # Polymarket public endpoints (all read-only — no keys needed for the data layer)
     "gamma_base": "https://gamma-api.polymarket.com",

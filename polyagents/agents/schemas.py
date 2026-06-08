@@ -41,6 +41,13 @@ class Reflection(BaseModel):
     confidence: Conviction = Field(description="Confidence that the decision is correct.")
 
 
+class Lesson(BaseModel):
+    """Reflection agent output after a trade resolves (the learning signal)."""
+
+    summary: str = Field(description="One-paragraph lesson: what the signal got right/wrong and why.")
+    what_to_change: str = Field(description="One concrete adjustment for next time on similar markets.")
+
+
 @dataclass
 class TradeDecision:
     """Deterministic decision agent output (risk + Kelly sizing)."""
