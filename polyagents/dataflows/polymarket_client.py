@@ -1,22 +1,23 @@
 """Read-only Polymarket data client.
 
-Wraps three public Polymarket surfaces over plain ``httpx`` — no API keys, no
-SDK, no signing — because the data-collection layer only reads:
+Reads four Polymarket surfaces:
 
   * Gamma REST       — active-market metadata (discovery)
-  * CLOB REST        — ``/prices-history`` and the public ``/book`` order book
+  * CLOB REST        — ``/prices-history``
   * data-api REST    — ``/trades`` (taker/maker fills, for volume + flow)
+  * Order book       — via the **official py-clob-client SDK** (Merakku v3.0
+                       Layer 1 P0), falling back to the public ``/book`` REST
+                       endpoint when the SDK isn't importable.
 
-Trading (order placement, which *does* need keys) belongs to the later
-execution layer and is deliberately not part of this client. The logic mirrors
-polymarket's ``src/data/polymarket_client.py``; the order book is fetched from
-the public REST endpoint instead of the authenticated SDK so the whole layer
-runs credential-free.
+Per the v3.0 plan the official Python CLOB client replaces self-built API calls
+for the order book; its public L1 reads (``get_order_book``) need no API keys,
+so the layer still runs credential-free. Order *placement* (which does need
+keys) stays out of this read-only client — that's the execution layer.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Iterable
+from typing import Any, Iterable
 
 import httpx
 
@@ -42,11 +43,20 @@ class PolymarketDataClient:
         data_api_base: str,
         timeout: float = 20.0,
         http: httpx.Client | None = None,
+        chain_id: int = 137,
+        use_clob_sdk: bool = True,
+        clob: Any | None = None,
     ) -> None:
         self.gamma_base = gamma_base.rstrip("/")
         self.clob_base = clob_base.rstrip("/")
         self.data_api_base = data_api_base.rstrip("/")
         self._http = http or httpx.Client(timeout=timeout)
+        self.chain_id = chain_id
+        self._use_clob_sdk = use_clob_sdk
+        # Official py-clob-client handle. May be injected (tests) or lazily
+        # constructed on first order-book read. ``_clob_ready`` guards re-init.
+        self._clob = clob
+        self._clob_ready = clob is not None
 
     @classmethod
     def from_config(cls, config: dict, http: httpx.Client | None = None) -> "PolymarketDataClient":
@@ -56,7 +66,22 @@ class PolymarketDataClient:
             data_api_base=config["data_api_base"],
             timeout=config.get("http_timeout", 20.0),
             http=http,
+            chain_id=config.get("polymarket_chain_id", 137),
+            use_clob_sdk=config.get("use_clob_sdk", True),
         )
+
+    def _get_clob(self):
+        """Lazily construct the official read-only CLOB SDK client (no keys)."""
+        if self._clob_ready or not self._use_clob_sdk:
+            return self._clob
+        self._clob_ready = True
+        try:
+            from py_clob_client.client import ClobClient
+
+            self._clob = ClobClient(host=self.clob_base, chain_id=self.chain_id)
+        except Exception:
+            self._clob = None
+        return self._clob
 
     def close(self) -> None:
         self._http.close()
@@ -187,10 +212,29 @@ class PolymarketDataClient:
             offset += TRADES_PAGE_SIZE
         return out
 
-    # ----- order book (public CLOB REST) ------------------------------------
+    # ----- order book (official SDK, REST fallback) -------------------------
 
     def fetch_order_book(self, token_id: str) -> OrderBook | None:
-        """Public ``/book`` snapshot — no auth required, unlike the SDK path."""
+        """L2 snapshot via the official py-clob-client SDK, REST as fallback."""
+        clob = self._get_clob()
+        if clob is not None:
+            book = self._order_book_via_sdk(clob, token_id)
+            if book is not None:
+                return book
+        return self._order_book_via_rest(token_id)
+
+    def _order_book_via_sdk(self, clob, token_id: str) -> OrderBook | None:
+        try:
+            summary = clob.get_order_book(token_id)
+        except Exception:
+            return None
+        bids = _parse_levels(getattr(summary, "bids", None), descending=True)
+        asks = _parse_levels(getattr(summary, "asks", None), descending=False)
+        if not bids and not asks:
+            return None
+        return OrderBook(token_id=token_id, bids=bids, asks=asks)
+
+    def _order_book_via_rest(self, token_id: str) -> OrderBook | None:
         try:
             r = self._http.get(f"{self.clob_base}/book", params={"token_id": token_id})
             r.raise_for_status()
@@ -204,18 +248,27 @@ class PolymarketDataClient:
         return OrderBook(token_id=token_id, bids=bids, asks=asks)
 
 
-def _parse_levels(raw: object, descending: bool) -> list[OrderBookLevel]:
-    """Normalise ``[{"price","size"}, ...]`` and sort by price.
+def _level_price_size(lvl: Any) -> tuple[float, float] | None:
+    """Read (price, size) from either a dict (REST) or an OrderSummary (SDK)."""
+    try:
+        if isinstance(lvl, dict):
+            return float(lvl["price"]), float(lvl["size"])
+        return float(lvl.price), float(lvl.size)   # py-clob-client OrderSummary
+    except (KeyError, AttributeError, ValueError, TypeError):
+        return None
 
-    Polymarket returns book levels worst-first; we sort so index 0 is the best
-    price on each side (highest bid / lowest ask).
+
+def _parse_levels(raw: object, descending: bool) -> list[OrderBookLevel]:
+    """Normalise book levels (dicts or SDK objects) and sort best-first.
+
+    Polymarket returns levels worst-first; we sort so index 0 is the best price
+    on each side (highest bid / lowest ask).
     """
     levels: list[OrderBookLevel] = []
     if isinstance(raw, list):
         for lvl in raw:
-            try:
-                levels.append(OrderBookLevel(price=float(lvl["price"]), size=float(lvl["size"])))
-            except (KeyError, ValueError, TypeError):
-                continue
+            ps = _level_price_size(lvl)
+            if ps is not None:
+                levels.append(OrderBookLevel(price=ps[0], size=ps[1]))
     levels.sort(key=lambda l: l.price, reverse=descending)
     return levels

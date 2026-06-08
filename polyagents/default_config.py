@@ -63,6 +63,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "clob_base": "https://clob.polymarket.com",
     "data_api_base": "https://data-api.polymarket.com",
 
+    # Order book via the official py-clob-client SDK (Merakku v3.0 Layer 1 P0).
+    # Public L1 reads need no keys; set use_clob_sdk False to force the REST path.
+    "polymarket_chain_id": 137,        # Polygon
+    "use_clob_sdk": True,
+
     # Market discovery
     "markets_limit": 500,             # how many active markets to page from Gamma
 

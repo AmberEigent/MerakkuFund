@@ -20,18 +20,22 @@ START ─► market_data ─► orderbook ─► trades_flow ─► news ─► 
         volume_report     report        report     (+sentiment) (factor vector)
 ```
 
-### Layer 1 capabilities (built native, inspired by the Merakku doc's 5 projects)
+### Layer 1 capabilities (tracking the Merakku v3.0 Layer 1 projects)
 
 | Source project | What we built | Module |
 |---|---|---|
+| **Polymarket py-clob-client** (P0) | Order book read via the **official CLOB SDK** (richer L2 depth), public REST `/book` as fallback | `dataflows/polymarket_client.py` |
 | **MarketLens** (P0) | L2 microstructure: size-weighted micro-price, multi-level depth imbalance, book pressure, spread (bps), queue-at-touch | `dataflows/microstructure.py` |
 | **FinGPT** (P0) | Sentiment scoring on news; `SentimentScorer` protocol + deterministic lexicon default, LLM/FinGPT pluggable | `dataflows/sentiment.py` |
 | **Alpha DevBox** (P0) | Deterministic factor extraction — joins every collector's output into one named factor vector | `dataflows/features.py` |
 | **Kronos** (P3) | `CandleForecaster` protocol seam over the close series; `NullForecaster` default | `dataflows/forecaster.py` |
-| **FinceptTerminal** (P2) | reference only — no code | — |
+| **Polyseer / poly_data** (P1) | planned — real-time market intelligence & event/historical retrieval | — |
+| **pmxt / FinceptTerminal** (P2) | reference only — no code | — |
 
 The FinGPT and Kronos seams are **injectable**: `PolyAgentsGraph(scorer=..., forecaster=...)`
 swaps the lightweight built-ins for model-backed implementations without touching the graph.
+The order book uses the official SDK by default (no keys needed for public L1 reads);
+set `use_clob_sdk: False` in config to force the REST path.
 
 ## Layout
 
@@ -39,7 +43,7 @@ swaps the lightweight built-ins for model-backed implementations without touchin
 polyagents/
   default_config.py        # config dict + env overrides (mirrors TA default_config)
   dataflows/               # the data interface — "tools" the graph calls
-    polymarket_client.py   # Gamma + CLOB + data-api, read-only over httpx
+    polymarket_client.py   # Gamma + data-api over httpx; order book via official py-clob-client SDK
     news.py                # Tavily news search (graceful no-key fallback)
     volume.py              # rebuild candle volume from /trades
     microstructure.py      # MarketLens-inspired L2 features
