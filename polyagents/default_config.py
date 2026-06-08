@@ -104,6 +104,16 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "anthropic_model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
     "anthropic_temperature": 0.0,
 
+    # Layer 3 — execution.
+    "execution_mode": os.getenv("POLYAGENTS_EXECUTION_MODE", "paper"),  # paper | live
+    "paper_slippage_bps": 50.0,       # modeled slippage on simulated fills
+    # Circuit breaker (mirror polymarket reference repo). bankroll_usdc above is
+    # the capital base for these caps.
+    "max_daily_loss_pct": 0.05,       # halt new entries after -5% realised in a day
+    "max_total_exposure_pct": 0.50,   # cap open exposure at 50% of bankroll
+    "max_concurrent_positions": 10,
+    "max_consecutive_losses": 5,      # cooldown after this many losing exits
+
     # MCP servers exposed to runtime agents (mirrors .mcp.json used by Claude
     # Code at dev-time). The Polymarket docs MCP is a documentation search/read
     # server — see polyagents/mcp_tools.py.

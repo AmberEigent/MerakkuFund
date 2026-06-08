@@ -6,6 +6,9 @@ Layer 1 (data collection):
 Full analysis (Layer 1 + Layer 2 decision engine):
     … → features → signal → decision → reflection → END
 
+Full trading pipeline (+ Layer 3 execution):
+    … → reflection → execute → END
+
 Collectors run sequentially (like TradingAgents' analyst chain). Each does a
 read-modify-write on ``state["raw"]``, so a sequential chain keeps those merges
 conflict-free. ``features`` runs last among collectors so the signal agent sees
@@ -34,6 +37,7 @@ from .state import MarketState
 
 _COLLECTOR_CHAIN = ["market_data", "orderbook", "trades_flow", "news", "features"]
 _AGENT_CHAIN = ["signal", "decision", "reflection"]
+_EXEC_CHAIN = ["execute"]
 
 
 def _collector_nodes(client, news_client, config, scorer, forecaster) -> dict:
@@ -91,6 +95,34 @@ def build_analysis_graph(
     nodes["reflection"] = create_reflection_agent(llm)
 
     chain = _COLLECTOR_CHAIN + _AGENT_CHAIN
+    workflow = StateGraph(MarketState)
+    for name in chain:
+        workflow.add_node(name, nodes[name])
+    _wire_chain(workflow, chain)
+    return workflow.compile()
+
+
+def build_trading_graph(
+    client: PolymarketDataClient,
+    news_client: NewsClient,
+    config: dict,
+    llm,
+    execute_node,
+    scorer: SentimentScorer | None = None,
+    forecaster: CandleForecaster | None = None,
+):
+    """Layer 1 + 2 + 3: analysis then execution.
+
+    ``execute_node`` is built by the orchestrator so it can close over the
+    persistent portfolio + circuit breaker (state that outlives a single run).
+    """
+    nodes = _collector_nodes(client, news_client, config, scorer, forecaster)
+    nodes["signal"] = create_signal_agent(llm)
+    nodes["decision"] = create_decision_agent(config)
+    nodes["reflection"] = create_reflection_agent(llm)
+    nodes["execute"] = execute_node
+
+    chain = _COLLECTOR_CHAIN + _AGENT_CHAIN + _EXEC_CHAIN
     workflow = StateGraph(MarketState)
     for name in chain:
         workflow.add_node(name, nodes[name])

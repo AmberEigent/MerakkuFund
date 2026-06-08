@@ -51,6 +51,10 @@ class MarketState(MessagesState):
     reflection: Annotated[Any, "Reflection agent output (Reflection)"]
     reflection_report: Annotated[str, "Reflection summary"]
 
+    # --- Layer 3: execution ---
+    execution_result: Annotated[Any, "ExecutionResult from the execution agent"]
+    execution_report: Annotated[str, "Execution + portfolio summary"]
+
 
 def build_initial_state(market: Market, as_of: str) -> dict[str, Any]:
     """Seed a fresh ``MarketState`` from a resolved :class:`Market`."""

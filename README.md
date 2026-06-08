@@ -9,18 +9,19 @@ graph nodes, each node reads it, does its job, and writes a partial update back
 
 The project is built layer by layer. **Layer 1** (data collection) gathers
 everything about one market into a typed state; **Layer 2** (decision engine)
-turns that into a sized, risk-gated trade. The execution + feedback layers come
-next.
+turns that into a sized, risk-gated trade; **Layer 3** (execution) fills it on a
+paper (or live CLOB) venue through a circuit breaker. The feedback layer is next.
 
 ```
-   ── Layer 1: data collection (deterministic) ──┐  ┌── Layer 2: decision engine ──
-START ► market_data ► orderbook ► trades_flow ► news ► features ► signal ► decision ► reflection ► END
-          price/        L2 micro-   buy/sell      (+senti-  factor    LLM       Kelly +    LLM self-
-          volume        structure   flow          ment)     vector    p_true    risk gate  critique
+   ── L1: data collection ──┐  ┌── L2: decision engine ──┐  ┌─ L3: execution ─
+START ► … ► features ► signal ► decision ► reflection ► execute ► END
+            factor      LLM      Kelly +     LLM self-     paper/live +
+            vector      p_true   risk gate   critique      circuit breaker
 ```
 
-`collect(market)` runs Layer 1 only (no LLM/keys); `analyze(market)` runs the
-full pipeline (Layer 2 needs an Anthropic key, or inject an `llm`).
+`collect(market)` runs Layer 1 only (no LLM/keys); `analyze(market)` adds
+Layer 2 (needs an Anthropic key, or inject an `llm`); `trade(market)` adds
+Layer 3 execution (paper by default — no keys, no real orders).
 
 ### Layer 1 capabilities (tracking the Merakku v3.0 Layer 1 projects)
 
@@ -61,6 +62,30 @@ state = ta.analyze(market)             # signal -> decision -> reflection
 print(state["decision_report"])
 ```
 
+### Layer 3 — execution (Merakku v3.0, NautilusTrader-inspired)
+
+The decision becomes an order, passes a circuit breaker, and fills on a venue —
+NautilusTrader's port/adapter shape, scaled to Polymarket:
+
+| Piece | Role | Module |
+|---|---|---|
+| `ExecutionClient` (port) | venue interface; strategy depends only on this | `execution/clients.py` |
+| `PaperExecutionClient` | **default**: simulate fills at touch ± slippage, book to portfolio | `execution/clients.py` |
+| `LiveCLOBExecutionClient` | real GTC limit orders via official SDK (needs `POLYMARKET_PRIVATE_KEY`); **gated, never default** | `execution/clients.py` |
+| `Portfolio` | virtual cash, positions, realised/unrealised P&L | `execution/portfolio.py` |
+| `CircuitBreaker` | pre-trade gates: daily-loss halt, exposure cap, max concurrent, consecutive-loss cooldown, cash | `execution/circuit_breaker.py` |
+
+```python
+ta = PolyAgentsGraph()                 # execution_mode="paper" by default
+state = ta.trade(market)               # … reflection -> execute (circuit-breaker gated)
+print(state["execution_report"])       # FILLED / BLOCKED / SKIPPED + portfolio
+print(ta.portfolio.cash, ta.portfolio.positions, ta.portfolio.realized_pnl())
+```
+
+The portfolio + breaker persist on the `PolyAgentsGraph` across markets. Set
+`execution_mode: "live"` (and `POLYMARKET_PRIVATE_KEY`) to place real orders —
+off by default so nothing trades for real unless you opt in.
+
 ### Polymarket docs MCP
 
 The official [Polymarket documentation MCP](https://docs.polymarket.com/mcp) (a
@@ -98,14 +123,20 @@ polyagents/
     schemas.py             # Signal / Reflection (pydantic) + TradeDecision
     signal_agent.py        # LLM: estimate true probability
     decision_agent.py      # deterministic: edge + Kelly + risk gates
-    risk.py                # pure risk math (edge, Kelly fraction)
+    risk.py                # pure risk math (edge, Kelly fraction, effective price)
     reflection_agent.py    # LLM: pre-trade self-critique
+  execution/               # Layer 3 — execution
+    types.py               # Order / Fill / Position / ExecutionResult
+    portfolio.py           # virtual cash, positions, realised P&L
+    circuit_breaker.py     # pre-trade safety gates
+    clients.py             # ExecutionClient port + Paper / LiveCLOB adapters
+    agent.py               # execution node (decision -> breaker -> venue)
   mcp_tools.py             # load configured MCP servers (Polymarket docs) as LangGraph tools
   graph/
     state.py               # MarketState TypedDict (L1+L2 fields) + initial-state builder
     data_collection.py     # collector node factories (incl. features join)
-    setup.py               # build_data_collection_graph (L1) + build_analysis_graph (L1+L2)
-    orchestrator.py        # PolyAgentsGraph — collect() (L1) / analyze() (L1+L2)
+    setup.py               # build_data_collection_graph / _analysis_graph / _trading_graph
+    orchestrator.py        # PolyAgentsGraph — collect() / analyze() / trade()
 ```
 
 ## Quick start
