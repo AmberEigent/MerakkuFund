@@ -52,10 +52,11 @@ def fetch_enriched_candles(
     condition_id: str,
     interval: str = "1h",
     fidelity: int = 60,
+    store=None,
 ) -> list[Candle]:
-    """Price-history candles with reconstructed volume."""
+    """Price-history candles with reconstructed volume (trades cached via ``store``)."""
     candles = client.fetch_price_history(token_id, interval=interval, fidelity=fidelity)
-    return enrich_candles_with_volume(candles, condition_id, token_id, client)
+    return enrich_candles_with_volume(candles, condition_id, token_id, client, store=store)
 
 
 def format_price_report(candles: list[Candle]) -> tuple[str, dict[str, Any]]:

@@ -29,7 +29,7 @@ from polyagents.dataflows.sentiment import LexiconSentimentScorer, SentimentScor
 Node = Callable[[dict], dict]
 
 
-def create_market_data_collector(client: PolymarketDataClient, config: dict) -> Node:
+def create_market_data_collector(client: PolymarketDataClient, config: dict, store=None) -> Node:
     """Price history + reconstructed volume in one node (volume needs the candles)."""
 
     def node(state: dict) -> dict[str, Any]:
@@ -39,7 +39,10 @@ def create_market_data_collector(client: PolymarketDataClient, config: dict) -> 
             condition_id=state["condition_id"],
             interval=config["price_interval"],
             fidelity=config["price_fidelity"],
+            store=store,
         )
+        if store is not None and candles:
+            store.upsert_candles(state["token_id"], candles)
         price_text, price_data = format_price_report(candles)
         volume_text, volume_data = format_volume_report(candles)
         raw = dict(state.get("raw", {}))
@@ -50,9 +53,11 @@ def create_market_data_collector(client: PolymarketDataClient, config: dict) -> 
     return node
 
 
-def create_orderbook_collector(client: PolymarketDataClient, config: dict) -> Node:
+def create_orderbook_collector(client: PolymarketDataClient, config: dict, store=None) -> Node:
     def node(state: dict) -> dict[str, Any]:
         text, data = get_orderbook_report(client, state["token_id"])
+        if store is not None and data.get("available"):
+            store.record_orderbook(state["token_id"], data, ts=state.get("as_of"))
         raw = dict(state.get("raw", {}))
         raw["orderbook"] = data
         return {"orderbook_report": text, "raw": raw}
@@ -94,12 +99,13 @@ def create_news_collector(
     return node
 
 
-def create_features_collector(forecaster: CandleForecaster | None = None) -> Node:
+def create_features_collector(forecaster: CandleForecaster | None = None, store=None) -> Node:
     """Alpha DevBox-inspired join: consolidate all collector outputs into factors.
 
     Runs last in the chain so every ``raw`` source is populated. Calls the
     (Kronos) forecaster hook on the close series; a real forecaster adds a
-    ``forecast`` block, the default ``NullForecaster`` adds nothing.
+    ``forecast`` block, the default ``NullForecaster`` adds nothing. Persists the
+    full ``raw`` bundle for the run when a ``store`` is given.
     """
     forecaster = forecaster or NullForecaster()
 
@@ -107,6 +113,11 @@ def create_features_collector(forecaster: CandleForecaster | None = None) -> Nod
         raw = dict(state.get("raw", {}))
         data = extract_features(raw, forecaster=forecaster)
         raw["features"] = data
+        if store is not None:
+            store.record_collection(
+                state["token_id"], state.get("as_of", ""), state.get("question", ""),
+                float(state.get("market_price") or 0.0), raw,
+            )
         return {"features_report": format_features_report(data), "raw": raw}
 
     return node

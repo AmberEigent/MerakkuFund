@@ -35,6 +35,7 @@ from polyagents.feedback.memory import MemoryStore, make_trade_record
 from polyagents.feedback.reflection import reflect_on_outcome
 from polyagents.feedback.report import pnl_report
 from polyagents.feedback.settlement import resolve_winner, resolve_winning_token, settlement_pnl
+from polyagents.storage.db import DataStore
 
 from .setup import build_analysis_graph, build_data_collection_graph, build_trading_graph
 from .state import build_initial_state
@@ -48,10 +49,18 @@ class PolyAgentsGraph:
         forecaster: CandleForecaster | None = None,
         llm: Any | None = None,
         execution_client: ExecutionClient | None = None,
+        store: DataStore | None = None,
     ) -> None:
         self.config = config or DEFAULT_CONFIG.copy()
         self.client = PolymarketDataClient.from_config(self.config)
         self.news_client = NewsClient(self.config.get("tavily_api_key"))
+        # Layer 1 persistence (SQLite). On by default; disable via config.
+        if store is not None:
+            self.store = store
+        elif self.config.get("persist_enabled", True):
+            self.store = DataStore(self.config["db_path"])
+        else:
+            self.store = None
         # FinGPT / Kronos seams — swap these for model-backed implementations later.
         self.scorer = scorer or LexiconSentimentScorer()
         self.forecaster = forecaster or NullForecaster()
@@ -80,7 +89,7 @@ class PolyAgentsGraph:
         if self._data_graph is None:
             self._data_graph = build_data_collection_graph(
                 self.client, self.news_client, self.config,
-                scorer=self.scorer, forecaster=self.forecaster,
+                scorer=self.scorer, forecaster=self.forecaster, store=self.store,
             )
         return self._data_graph
 
@@ -99,7 +108,7 @@ class PolyAgentsGraph:
         if self._analysis_graph is None:
             self._analysis_graph = build_analysis_graph(
                 self.client, self.news_client, self.config, self._get_llm(),
-                scorer=self.scorer, forecaster=self.forecaster, memory=self.memory,
+                scorer=self.scorer, forecaster=self.forecaster, memory=self.memory, store=self.store,
             )
         return self._analysis_graph
 
@@ -111,20 +120,26 @@ class PolyAgentsGraph:
             )
             self._trading_graph = build_trading_graph(
                 self.client, self.news_client, self.config, self._get_llm(), execute_node,
-                scorer=self.scorer, forecaster=self.forecaster, memory=self.memory,
+                scorer=self.scorer, forecaster=self.forecaster, memory=self.memory, store=self.store,
             )
         return self._trading_graph
 
     # ----- runs --------------------------------------------------------------
 
+    def _persist_market(self, market: Market) -> None:
+        if self.store is not None:
+            self.store.record_market(market)
+
     def collect(self, market: Market, as_of: str | None = None) -> dict[str, Any]:
         """Layer 1 only: data collection for one market; returns final state."""
         as_of = as_of or utcnow().isoformat()
+        self._persist_market(market)
         return self.data_graph.invoke(build_initial_state(market, as_of))
 
     def analyze(self, market: Market, as_of: str | None = None) -> dict[str, Any]:
         """Layer 1 + Layer 2: collect, then signal → decision → reflection."""
         as_of = as_of or utcnow().isoformat()
+        self._persist_market(market)
         return self.analysis_graph.invoke(build_initial_state(market, as_of))
 
     def trade(self, market: Market, as_of: str | None = None) -> dict[str, Any]:
@@ -132,6 +147,7 @@ class PolyAgentsGraph:
         circuit breaker; the portfolio persists across calls. The decision is
         logged to memory (Layer 4) as a pending record."""
         as_of = as_of or utcnow().isoformat()
+        self._persist_market(market)
         state = self.trading_graph.invoke(build_initial_state(market, as_of))
         self.memory.record(make_trade_record(state))
         return state
@@ -183,6 +199,8 @@ class PolyAgentsGraph:
 
     def close(self) -> None:
         self.client.close()
+        if self.store is not None:
+            self.store.close()
 
 
 def _format_state(state: dict[str, Any]) -> str:

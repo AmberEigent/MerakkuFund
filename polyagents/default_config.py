@@ -57,6 +57,10 @@ def _apply_env_overrides(config: dict) -> dict:
 DEFAULT_CONFIG = _apply_env_overrides({
     "project_root": str(_PROJECT_ROOT),
     "results_dir": os.getenv("POLYAGENTS_RESULTS_DIR", os.path.join(_POLYAGENTS_HOME, "logs")),
+    # Layer 1 persistence — SQLite cache + history (candles/trades/orderbook/collections).
+    "db_path": os.getenv("POLYAGENTS_DB_PATH", os.path.join(_POLYAGENTS_HOME, "cache", "polyagents.db")),
+    "persist_enabled": True,          # set False to run fully in-memory (no DB)
+
     # Layer 4 — persistent decision log / memory (JSONL).
     "memory_path": os.getenv("POLYAGENTS_MEMORY_PATH", os.path.join(_POLYAGENTS_HOME, "memory", "trades.jsonl")),
 

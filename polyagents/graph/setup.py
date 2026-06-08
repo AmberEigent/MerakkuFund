@@ -40,13 +40,13 @@ _AGENT_CHAIN = ["signal", "decision", "reflection"]
 _EXEC_CHAIN = ["execute"]
 
 
-def _collector_nodes(client, news_client, config, scorer, forecaster) -> dict:
+def _collector_nodes(client, news_client, config, scorer, forecaster, store=None) -> dict:
     return {
-        "market_data": create_market_data_collector(client, config),
-        "orderbook": create_orderbook_collector(client, config),
+        "market_data": create_market_data_collector(client, config, store=store),
+        "orderbook": create_orderbook_collector(client, config, store=store),
         "trades_flow": create_trades_flow_collector(client, config),
         "news": create_news_collector(news_client, config, scorer=scorer),
-        "features": create_features_collector(forecaster=forecaster),
+        "features": create_features_collector(forecaster=forecaster, store=store),
     }
 
 
@@ -64,12 +64,14 @@ def build_data_collection_graph(
     config: dict,
     scorer: SentimentScorer | None = None,
     forecaster: CandleForecaster | None = None,
+    store=None,
 ):
     """Layer 1 only: fill a ``MarketState`` with market data.
 
     ``scorer`` (FinGPT seam) and ``forecaster`` (Kronos seam) are injectable.
+    ``store`` (a DataStore) persists candles/trades/orderbook/collection.
     """
-    nodes = _collector_nodes(client, news_client, config, scorer, forecaster)
+    nodes = _collector_nodes(client, news_client, config, scorer, forecaster, store=store)
     workflow = StateGraph(MarketState)
     for name in _COLLECTOR_CHAIN:
         workflow.add_node(name, nodes[name])
@@ -85,13 +87,14 @@ def build_analysis_graph(
     scorer: SentimentScorer | None = None,
     forecaster: CandleForecaster | None = None,
     memory=None,
+    store=None,
 ):
     """Layer 1 + Layer 2: data collection then signal → decision → reflection.
 
     ``llm`` drives the signal and reflection agents (decision is deterministic).
     ``memory`` (optional) injects past lessons into the signal prompt.
     """
-    nodes = _collector_nodes(client, news_client, config, scorer, forecaster)
+    nodes = _collector_nodes(client, news_client, config, scorer, forecaster, store=store)
     nodes["signal"] = create_signal_agent(llm, memory=memory)
     nodes["decision"] = create_decision_agent(config)
     nodes["reflection"] = create_reflection_agent(llm)
@@ -113,6 +116,7 @@ def build_trading_graph(
     scorer: SentimentScorer | None = None,
     forecaster: CandleForecaster | None = None,
     memory=None,
+    store=None,
 ):
     """Layer 1 + 2 + 3: analysis then execution.
 
@@ -120,7 +124,7 @@ def build_trading_graph(
     persistent portfolio + circuit breaker (state that outlives a single run).
     ``memory`` (optional) injects past lessons into the signal prompt.
     """
-    nodes = _collector_nodes(client, news_client, config, scorer, forecaster)
+    nodes = _collector_nodes(client, news_client, config, scorer, forecaster, store=store)
     nodes["signal"] = create_signal_agent(llm, memory=memory)
     nodes["decision"] = create_decision_agent(config)
     nodes["reflection"] = create_reflection_agent(llm)

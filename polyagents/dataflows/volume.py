@@ -20,8 +20,14 @@ def enrich_candles_with_volume(
     condition_id: str,
     token_id: str,
     client: PolymarketDataClient,
+    store=None,
 ) -> list[Candle]:
-    """Return new candles with ``.volume`` populated. Short/empty markets pass through."""
+    """Return new candles with ``.volume`` populated. Short/empty markets pass through.
+
+    With a ``store`` the trades are cached: only the window the cache doesn't
+    cover is fetched, then bucketing reads from the cache. This is the big API
+    saver — a 1-week window can be many /trades pages.
+    """
     if not candles:
         return candles
 
@@ -30,7 +36,7 @@ def enrich_candles_with_volume(
         return candles
 
     needed_lo = int(candles[0].ts.timestamp())
-    raw_trades = client.fetch_market_trades(condition_id, min_ts=needed_lo)
+    raw_trades = _load_trades(condition_id, needed_lo, client, store)
     sizes = _flatten_sizes(raw_trades, token_id)
     if not sizes:
         return candles
@@ -43,6 +49,23 @@ def enrich_candles_with_volume(
                 ts=c.ts, open=c.open, high=c.high, low=c.low, close=c.close, volume=bucket_volumes[i]
             )
     return enriched
+
+
+def _load_trades(condition_id: str, needed_lo: int, client, store) -> list[dict]:
+    """Trades covering ``[needed_lo, now]`` — from cache + a gap fetch, or live.
+
+    Coverage is a fetch watermark, not the oldest cached trade, so a market with
+    no early trades isn't re-fetched on every run.
+    """
+    if store is None:
+        return client.fetch_market_trades(condition_id, min_ts=needed_lo)
+    coverage = store.trade_coverage(condition_id)
+    if coverage is None or coverage > needed_lo:
+        fresh = client.fetch_market_trades(condition_id, min_ts=needed_lo)
+        if fresh:
+            store.insert_trades(condition_id, fresh)
+        store.mark_trade_coverage(condition_id, needed_lo)
+    return store.fetch_trades(condition_id, min_ts=needed_lo)
 
 
 def _detect_bar_seconds(candles: list[Candle]) -> int:

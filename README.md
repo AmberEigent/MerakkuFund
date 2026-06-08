@@ -45,6 +45,22 @@ swaps the lightweight built-ins for model-backed implementations without touchin
 The order book uses the official SDK by default (no keys needed for public L1 reads);
 set `use_clob_sdk: False` in config to force the REST path.
 
+#### Persistence (SQLite)
+
+Layer 1 writes through to a SQLite store (`storage/db.py`, stdlib only) at
+`~/.polyagents/cache/polyagents.db`: `markets`, `candles`, `trades`,
+`orderbook_snapshots`, and `collections` (the full factor bundle per run). Two
+wins: **caching** — the volume reconstruction reuses cached trades (tracked by a
+fetch watermark), so re-collecting a market doesn't re-paginate a week of
+`/trades`; and **history** — candles / books / collections accumulate for later
+ML / backtesting. On by default; `persist_enabled: False` runs fully in-memory.
+
+```python
+ta = PolyAgentsGraph()
+ta.collect(market)
+print(ta.store.counts())   # {'markets': 1, 'candles': 169, 'trades': 3418, ...}
+```
+
 ### Layer 2 — decision engine (Merakku v3.0 three-agent architecture)
 
 | Agent | Role | How | Module |
@@ -166,6 +182,8 @@ polyagents/
     settlement.py          # resolve winner (by token) + paper payout
     reflection.py          # LLM outcome reflection -> Lesson
     report.py              # P&L / attribution report
+  storage/
+    db.py                  # SQLite store: markets/candles/trades/orderbook/collections + trades cache
   mcp_tools.py             # load configured MCP servers (Polymarket docs) as LangGraph tools
   graph/
     state.py               # MarketState TypedDict (L1+L2 fields) + initial-state builder
