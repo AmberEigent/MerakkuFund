@@ -163,6 +163,22 @@ docs **search/read** server — not a market-data feed) is wired in two ways:
   Servers are configured under `mcp_servers` in `default_config.py`; an empty map
   short-circuits with no network call and no extra imports.
 
+## Chat frontend
+
+A self-hosted chat UI (like a focused ChatGPT for trading) ships in
+`polyagents/web/`: a Claude ReAct agent bound to the polyagents tools, with the
+`polymarket-trading` SKILL as its system prompt, streamed to a browser over SSE.
+
+```bash
+python -m polyagents.web        # http://127.0.0.1:8000  (needs ANTHROPIC_API_KEY)
+```
+
+You chat ("scan the most active markets", "analyse a liquid one", "show my paper
+portfolio"); the agent reasons with Claude and calls the deterministic tools
+(scan → snapshot → size → paper-trade → settle/evaluate). Paper-only. This is the
+lightweight single-app alternative to running polyagents inside an Alpha
+DevBox-style multi-user shell — same tool surface either way.
+
 ## Platform integration — polyagents as skills + MCP
 
 polyagents is also packaged as **skills + an MCP server** so it can plug into an
@@ -235,6 +251,10 @@ polyagents/
     store.py               # ChromaDB RAG over markets (Polymarket/agents-style retrieval)
   mcp_tools.py             # load configured MCP servers (Polymarket docs) as LangGraph tools
   mcp_server.py            # FastMCP server: expose the engine as tools for a host platform
+  web/                     # chat frontend
+    agent.py               # Claude ReAct agent + polyagents tools + SKILL prompt
+    server.py              # FastAPI + SSE streaming
+    static/index.html      # the chat UI
   graph/
     state.py               # MarketState TypedDict (L1+L2 fields) + initial-state builder
     data_collection.py     # collector node factories (incl. features join)
