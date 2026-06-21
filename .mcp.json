@@ -3,6 +3,31 @@
     "polymarket-docs": {
       "type": "http",
       "url": "https://docs.polymarket.com/mcp"
+    },
+    "polyagents": {
+      "command": "C:\\polymarket\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "polyagents.mcp_server"],
+      "env": { "PYTHONPATH": "C:\\polyagents" }
+    },
+    "crypto": {
+      "command": "C:\\polymarket\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "polyagents.mcp_servers.crypto"],
+      "env": { "PYTHONPATH": "C:\\polyagents" }
+    },
+    "polydata": {
+      "command": "C:\\polymarket\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "polyagents.mcp_servers.polydata"],
+      "env": { "PYTHONPATH": "C:\\polyagents" }
+    },
+    "compliance": {
+      "command": "C:\\polymarket\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "polyagents.mcp_servers.compliance"],
+      "env": { "PYTHONPATH": "C:\\polyagents" }
+    },
+    "qlib-backtest": {
+      "command": "C:\\qlib\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "polyagents.mcp_servers.qlib_backtest"],
+      "env": { "PYTHONPATH": "C:\\polyagents" }
     }
   }
 }
