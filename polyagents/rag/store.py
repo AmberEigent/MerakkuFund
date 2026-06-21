@@ -19,6 +19,47 @@ from polyagents.dataflows.types import Market
 _COLLECTION = "polyagents_markets"
 
 
+class _LocalTextEmbedding:
+    """Small deterministic embedding for offline tests and sandboxed runs.
+
+    Chroma's default ONNX embedding may download/write model files under the
+    user's home cache. This embedding keeps the default RAG path fully local and
+    dependency-free while preserving enough lexical semantics for retrieval.
+    """
+
+    _KEYWORDS = (
+        ("bitcoin", "btc", "crypto"),
+        ("ethereum", "eth", "crypto"),
+        ("crypto", "token", "blockchain"),
+        ("price", "market", "cap"),
+        ("rain", "weather", "storm"),
+        ("lakers", "nba", "finals", "sports"),
+        ("election", "president", "candidate"),
+        ("fed", "rate", "inflation", "macro"),
+    )
+
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        return [self._embed(text) for text in input]
+
+    def embed_query(self, input: list[str]) -> list[list[float]]:
+        return self(input)
+
+    def embed_documents(self, input: list[str]) -> list[list[float]]:
+        return self(input)
+
+    def name(self) -> str:
+        return "polyagents-local-text"
+
+    @classmethod
+    def _embed(cls, text: str) -> list[float]:
+        lower = text.lower()
+        vec: list[float] = []
+        for group in cls._KEYWORDS:
+            vec.append(float(sum(1 for word in group if word in lower)))
+        vec.append(float(len(lower.split())) / 20.0)
+        return vec
+
+
 class ChromaRAG:
     def __init__(self, path: str | None = None, collection: str = _COLLECTION,
                  client: Any | None = None) -> None:
@@ -40,7 +81,10 @@ class ChromaRAG:
                     chromadb.PersistentClient(path=self.path) if self.path
                     else chromadb.EphemeralClient()
                 )
-            self._col = self._client.get_or_create_collection(self._collection_name)
+            self._col = self._client.get_or_create_collection(
+                self._collection_name,
+                embedding_function=_LocalTextEmbedding(),
+            )
         except Exception:
             self._disabled = True
             self._col = None
