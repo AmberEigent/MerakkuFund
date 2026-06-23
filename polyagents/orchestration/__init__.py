@@ -28,6 +28,7 @@ from typing import Any
 
 from .base import SubAgent
 from .blackboard import AgentResult, Blackboard
+from .llm_router import LLMRouter
 from .subagents import DataAgent, ExecutionAgent, RiskAgent, SignalAgent
 from .supervisor import CallbackRouter, Router, SequentialRouter, Supervisor
 
@@ -41,37 +42,44 @@ STRATEGIES: dict[str, list[str]] = {
 
 
 def build_supervisor(*, graph: Any = None, config: dict | None = None,
-                     strategy: str = "full", **kwargs) -> Supervisor:
+                     strategy: str = "full", router: Router | None = None,
+                     **kwargs) -> Supervisor:
     """Assemble the standard sub-agents into a Supervisor for ``strategy``.
 
     ``graph`` (a PolyAgentsGraph) is required for any plan containing data /
-    signal / execution; ``RiskAgent`` only needs ``config``.
+    signal / execution; ``RiskAgent`` only needs ``config``. Pass ``router`` to
+    override the default fixed-plan walk (e.g. an :class:`LLMRouter`); when an
+    LLM router is used, all standard sub-agents are made available regardless of
+    ``strategy`` so the model can choose freely.
     """
     config = config or {}
     plan = STRATEGIES.get(strategy, STRATEGIES["full"])
+    names = list(STRATEGIES["trade"]) if router is not None else plan
     agents: list[SubAgent] = []
-    if "data" in plan:
+    if "data" in names:
         agents.append(DataAgent(graph))
-    if "signal" in plan:
+    if "signal" in names:
         agents.append(SignalAgent(graph))
-    if "risk" in plan:
+    if "risk" in names:
         agents.append(RiskAgent(config))
-    if "execution" in plan:
+    if "execution" in names:
         agents.append(ExecutionAgent(graph))
-    return Supervisor(agents, SequentialRouter(plan), **kwargs)
+    return Supervisor(agents, router or SequentialRouter(plan), **kwargs)
 
 
 def run_strategy(market, *, graph: Any, config: dict, strategy: str = "full",
-                 on_event=None) -> Blackboard:
+                 router: Router | None = None, on_event=None) -> Blackboard:
     """One-call convenience: run ``strategy`` end-to-end on ``market``."""
-    sup = build_supervisor(graph=graph, config=config, strategy=strategy, on_event=on_event)
-    goal = f"run '{strategy}' on {getattr(market, 'question', market)}"
+    sup = build_supervisor(graph=graph, config=config, strategy=strategy,
+                           router=router, on_event=on_event)
+    label = "llm-routed" if router is not None else strategy
+    goal = f"run '{label}' on {getattr(market, 'question', market)}"
     return sup.run(goal=goal, market=market, config=config)
 
 
 __all__ = [
     "AgentResult", "Blackboard", "SubAgent",
     "DataAgent", "SignalAgent", "RiskAgent", "ExecutionAgent",
-    "Supervisor", "Router", "SequentialRouter", "CallbackRouter",
+    "Supervisor", "Router", "SequentialRouter", "CallbackRouter", "LLMRouter",
     "STRATEGIES", "build_supervisor", "run_strategy",
 ]

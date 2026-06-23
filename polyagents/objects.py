@@ -20,6 +20,7 @@ Persistence (the ``objects`` / ``promotion_events`` tables) lives elsewhere.
 """
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -236,3 +237,38 @@ def risk_gate_passed(*, paper_apy: float, max_drawdown: float, paper_n: int,
     """
     return (paper_apy > min_apy and max_drawdown > dd_limit
             and paper_n >= min_n and manual_approved)
+
+
+# ----- (de)serialization — for persistence / the API ------------------------
+
+_TUPLE_FIELDS = {"feature_set", "positions"}     # FO fields stored as tuples
+
+
+def to_dict(fo: FO) -> dict:
+    """Plain JSON-able dict of an object (nested lineage / eval_summary included)."""
+    return dataclasses.asdict(fo)
+
+
+def from_dict(d: dict) -> FO:
+    """Rebuild the right FO subclass from :func:`to_dict` output (tuples restored)."""
+    d = dict(d)
+    lin = d.get("lineage") or {}
+    events = tuple(PromotionEvent(**e) for e in (lin.get("events") or ()))
+    d["lineage"] = Lineage(parent_id=lin.get("parent_id"), events=events)
+    ev = d.get("eval_summary")
+    if ev:
+        ev = dict(ev)
+        ci = ev.get("brier_delta_ci")
+        if ci is not None:
+            ev["brier_delta_ci"] = tuple(ci)
+        d["eval_summary"] = EvalSummary(**ev)
+    for f in _TUPLE_FIELDS:
+        if f in d and d[f] is not None:
+            d[f] = tuple(d[f])
+    cls = _CLASSES[d["type"]]
+    return cls(**d)
+
+
+def next_states(fo: FO) -> set[State]:
+    """The legal states this object can be promoted to right now."""
+    return set(ALLOWED_TRANSITIONS.get(fo.state, set()))

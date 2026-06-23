@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from polyagents.default_config import DEFAULT_CONFIG
 from polyagents.orchestration import (
-    Blackboard, CallbackRouter, RiskAgent, SequentialRouter, Supervisor,
-    build_supervisor, run_strategy,
+    Blackboard, CallbackRouter, LLMRouter, RiskAgent, SequentialRouter,
+    Supervisor, build_supervisor, run_strategy,
 )
 from polyagents.orchestration.base import SubAgent
 from polyagents.orchestration.blackboard import AgentResult
@@ -151,3 +151,43 @@ def test_run_strategy_full_pipeline_offline():
     assert bb.signal["p_true"] == 0.70
     assert bb.risk["action"] == "buy"
     assert "strategy run" in bb.summary()
+
+
+# ----- LLM router (scripted fake model) -------------------------------------
+
+class _FakeLLM:
+    """Returns a scripted next-agent choice per invoke()."""
+    def __init__(self, script):
+        self.script = list(script)
+        self.calls = 0
+
+    def invoke(self, messages):
+        from types import SimpleNamespace
+        choice = self.script[min(self.calls, len(self.script) - 1)]
+        self.calls += 1
+        return SimpleNamespace(content=f'{{"next": "{choice}", "why": "test"}}')
+
+
+def test_llm_router_drives_the_loop():
+    llm = _FakeLLM(["data", "signal", "risk", "stop"])
+    bb = run_strategy(_FakeMarket(), graph=_FakeGraph(), config=_permissive_config(),
+                      router=LLMRouter(llm))
+    assert [r.agent for r in bb.trace] == ["data", "signal", "risk"]
+    assert bb.risk["action"] == "buy"
+
+
+def test_llm_router_stops_on_unparseable_choice():
+    class _Bad:
+        def invoke(self, m):
+            from types import SimpleNamespace
+            return SimpleNamespace(content="I think maybe we should... hmm")
+    bb = run_strategy(_FakeMarket(), graph=_FakeGraph(), config=_permissive_config(),
+                      router=LLMRouter(_Bad()))
+    assert bb.trace == []                     # nothing ran; safe stop
+
+
+def test_llm_router_loop_guard_prevents_repeats():
+    # model fixates on "data"; max_repeat=1 means it runs once then stops
+    bb = run_strategy(_FakeMarket(), graph=_FakeGraph(), config=_permissive_config(),
+                      router=LLMRouter(_FakeLLM(["data", "data", "data"])))
+    assert [r.agent for r in bb.trace] == ["data"]
