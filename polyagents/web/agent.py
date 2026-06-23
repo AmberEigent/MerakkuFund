@@ -26,10 +26,38 @@ _SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 # expose an identical surface (one source of truth). The crypto / polydata /
 # compliance tools are bound too, so the cross-market-arb, research and
 # risk-check skills work in chat.
+def run_trading_strategy(token_id: str = "", strategy: str = "full") -> str:
+    """Run the multi-agent strategy loop on one Polymarket market and return the
+    agent-loop trace plus the sized decision.
+
+    A supervisor (the main agent) dispatches specialist sub-agents in sequence:
+    DataAgent (Layer-1 data) -> SignalAgent (probability read, LLM) -> RiskAgent
+    (calibration + Kelly + risk gates). Use this when the user wants to "run the
+    strategy / agents" on a market end-to-end, not just one step.
+
+    token_id: a market side's token id from scan_markets (empty = most active market).
+    strategy: 'research' (data only), 'signal' (data+signal), or 'full' (data+signal+risk).
+    """
+    from polyagents.orchestration import run_strategy
+
+    eng = mcp_server.engine()
+    market = mcp_server._get_market(token_id) if token_id else eng.most_active_market()
+    if market is None:
+        return f"No market found for token_id={token_id!r}."
+    bb = run_strategy(market, graph=eng, config=eng.config, strategy=strategy)
+    lines = [bb.summary()]
+    if bb.risk:
+        lines.append(f"\nDecision: {bb.risk['action'].upper()} "
+                     f"(edge {bb.risk['edge']:+.1%}, APY {bb.risk['apy']:+.0%}, "
+                     f"size ${bb.risk['size_usdc']:,.0f})")
+    return "\n".join(lines)
+
+
 _TOOL_FUNCS = [
     mcp_server.scan_markets,
     mcp_server.market_snapshot,
     mcp_server.find_similar_markets,
+    run_trading_strategy,
     mcp_server.size_position,
     mcp_server.paper_execute,
     mcp_server.portfolio_status,

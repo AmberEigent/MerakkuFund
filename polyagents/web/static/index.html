@@ -14,6 +14,7 @@
   body{background:var(--bg);color:var(--text);
        font:14px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
        display:flex;flex-direction:column;overflow:hidden}
+  button{background:transparent;color:inherit;font:inherit;border:0;cursor:pointer}
   /* top nav */
   .topnav{height:52px;flex:0 0 52px;display:flex;align-items:center;gap:18px;
        padding:0 18px;border-bottom:1px solid var(--line);background:var(--panel)}
@@ -26,10 +27,34 @@
   .topnav .spacer{flex:1}
   .badge{font-size:11px;color:var(--tooltext);border:1px solid var(--toolline);
        background:var(--tool);padding:4px 10px;border-radius:999px}
-  /* body grid */
-  .app{flex:1;display:grid;grid-template-columns:248px 1fr 300px;min-height:0}
+  /* body: flex columns — rail / list / center / portfolio (list & portfolio toggle) */
+  .app{flex:1;display:flex;min-height:0}
   aside{border-right:1px solid var(--line);background:var(--panel);overflow-y:auto;padding:14px}
-  aside.right{border-right:0;border-left:1px solid var(--line)}
+  aside.rail{flex:0 0 232px;width:232px;padding:14px 12px}
+  aside.right{flex:0 0 300px;width:300px;border-right:0;border-left:1px solid var(--line)}
+  .center{flex:1;min-width:0}
+  /* middle list column (prototype-style: chat history grouped) */
+  .list{flex:0 0 296px;width:296px;border-right:1px solid var(--line);background:var(--panel);
+       display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:0}
+  .list-head{padding:16px 16px 12px;border-bottom:1px solid var(--line)}
+  .list-head h2{margin:0 0 3px;font-size:21px;font-weight:600}
+  .list-head p{margin:0;color:var(--muted);font-size:12px}
+  .list-search{margin-top:12px;display:flex;align-items:center;gap:8px;border:1px solid var(--line);
+       background:var(--panel2);border-radius:9px;padding:8px 10px}
+  .list-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font-size:13px}
+  .list-search svg{width:14px;height:14px;color:var(--muted);flex:0 0 14px}
+  .list-scroll{flex:1;overflow-y:auto;padding:12px 12px 18px;min-height:0}
+  .list-new{width:100%;border:1px solid var(--line);background:var(--panel2);color:var(--text);
+       border-radius:10px;padding:9px;cursor:pointer;font-weight:600;margin-bottom:6px}
+  .list-new:hover{border-color:var(--accent)}
+  .hgroup{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;margin:14px 4px 7px}
+  .conv{width:100%;text-align:left;display:block;border:1px solid transparent;border-radius:10px;
+       padding:10px 11px;margin-bottom:5px;color:var(--text);cursor:pointer;background:transparent}
+  .conv:hover,.conv.active{background:var(--panel2);border-color:var(--line)}
+  .conv .ctop{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .conv .ctop b{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .conv .ctop .cm{color:var(--muted);font-size:11px;font-family:ui-monospace,monospace;flex:0 0 auto}
+  .conv .cd{color:var(--muted);font-size:12px;margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .newchat{width:100%;border:1px solid var(--line);background:var(--panel2);color:var(--text);
        border-radius:10px;padding:9px;cursor:pointer;font-weight:600}
   .newchat:hover{border-color:var(--accent)}
@@ -115,6 +140,82 @@
   .verdict.noise{background:#221317;border:1px solid #5a2530;color:#ff9aa6}
   .chartbox{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:12px}
   .chartbox .t{color:var(--muted);font-size:12px;margin-bottom:6px}
+  /* strategy module */
+  #strategyView{display:none;flex:1;overflow-y:auto;padding:22px 24px}
+  .st-top{margin-bottom:16px}
+  .st-controls{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin-bottom:18px}
+  .st-controls label{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  .st-controls select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:13px inherit;min-width:150px;max-width:340px}
+  .st-controls .send{height:40px}
+  .st-header{color:var(--muted);font-size:13px;margin-bottom:14px;min-height:18px}
+  .st-header b{color:var(--text)}
+  .st-flow{display:flex;flex-direction:column;gap:0;margin-bottom:18px}
+  .st-step{border:1px solid var(--line);background:var(--panel2);border-radius:11px;padding:12px 14px;position:relative}
+  .st-conn{height:16px;width:2px;background:var(--line);margin:0 0 0 26px}
+  .st-step .row{display:flex;align-items:center;gap:11px}
+  .st-step .ic{width:30px;height:30px;border-radius:9px;flex:0 0 30px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;border:1px solid var(--line);color:var(--muted)}
+  .st-step.run .ic{border-color:var(--accent2);color:var(--accent2);animation:pulse 1s ease-in-out infinite}
+  .st-step.ok .ic{background:var(--accent);border-color:var(--accent);color:#04130d}
+  .st-step.bad .ic{background:#3a1820;border-color:#a64d4d;color:#ff9aa6}
+  @keyframes pulse{50%{opacity:.45}}
+  .st-step .nm{font-weight:700;font-size:14px}
+  .st-step .st-state{margin-left:auto;font-size:11px;color:var(--muted);font-family:ui-monospace,monospace}
+  .st-step .sm{color:var(--muted);font-size:12.5px;margin-top:7px;margin-left:41px;line-height:1.5}
+  .st-step.ok .sm{color:var(--body-strong,#cdd5e6)}
+  .st-decision{border:1px solid var(--toolline);background:var(--tool);border-radius:12px;padding:16px;margin-top:6px}
+  .st-decision.hold{border-color:#5a4a25;background:#211d12}
+  .st-decision .dh{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}
+  .st-decision .da{font-size:22px;font-weight:800}
+  .st-decision .da.buy{color:var(--accent)} .st-decision .da.sell{color:#ff9aa6} .st-decision .da.hold{color:var(--warn,#e2c37a)}
+  .st-decision .dk{display:flex;flex-wrap:wrap;gap:18px;margin-top:10px;font-size:13px}
+  .st-decision .dk span{color:var(--muted)} .st-decision .dk b{color:var(--text);font-family:ui-monospace,monospace}
+  .st-err{border:1px solid #5a2530;background:#221317;color:#ff9aa6;border-radius:10px;padding:12px 14px}
+  /* objects module */
+  #objectsView{display:none;flex:1;overflow-y:auto;padding:22px 24px}
+  .ob-machine{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:4px 0 10px;font-size:13px}
+  .ob-st{padding:4px 11px;border-radius:999px;border:1px solid var(--line);font-family:ui-monospace,monospace;font-size:12px;color:var(--muted)}
+  .ob-st.draft{color:var(--muted)} .ob-st.lab{color:var(--accent2);border-color:#2c4a7a}
+  .ob-st.paper{color:var(--warn,#e2c37a);border-color:#5a4a25}
+  .ob-st.live{color:var(--accent);border-color:var(--toolline)}
+  .ob-st.arch{color:#8b94a7}
+  .ob-arrow{color:var(--muted);font-family:ui-monospace,monospace;font-size:11px}
+  .ob-gatekeys{display:flex;flex-wrap:wrap;gap:16px;color:var(--muted);font-size:11.5px;margin-bottom:18px}
+  .ob-gatekeys b{color:var(--text)} .ob-gatekeys .mono{font-family:ui-monospace,monospace}
+  .ob-cols{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px}
+  .ob-new{border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:14px;margin-bottom:14px}
+  .ob-new-h{font-weight:700;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+  .ob-new-h .mono{color:var(--muted);font-size:11px;font-weight:400}
+  .ob-new input{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 11px;font:13px inherit;margin-bottom:8px}
+  .ob-new input:focus{border-color:var(--accent);outline:none}
+  .ob-new-row{display:flex;gap:8px}.ob-new-row input{flex:1}
+  .ob-new .send{height:38px;width:100%}
+  .ob-table tbody tr.active{background:var(--panel2)}
+  .ob-badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-family:ui-monospace,monospace;border:1px solid var(--line);color:var(--muted)}
+  .ob-badge.lab{color:var(--accent2);border-color:#2c4a7a}
+  .ob-badge.paper{color:var(--warn,#e2c37a);border-color:#5a4a25}
+  .ob-badge.live{color:var(--accent);border-color:var(--toolline)}
+  .ob-badge.archived{color:#8b94a7}
+  .ob-detail{border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:16px;align-self:start;min-height:200px}
+  .ob-detail h3{margin:0 0 4px;font-size:15px}
+  .ob-detail .obid{color:var(--muted);font-family:ui-monospace,monospace;font-size:11px;margin-bottom:12px}
+  .ob-kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12.5px;margin-bottom:14px}
+  .ob-kv dt{color:var(--muted)} .ob-kv dd{margin:0;color:var(--text);font-family:ui-monospace,monospace;word-break:break-word}
+  .ob-gates{display:flex;gap:8px;margin-bottom:14px}
+  .ob-gate{flex:1;border:1px solid var(--line);border-radius:9px;padding:9px;text-align:center;font-size:11px}
+  .ob-gate .gn{color:var(--muted);font-family:ui-monospace,monospace;margin-bottom:4px}
+  .ob-gate .gs{font-weight:700}
+  .ob-gate.pass{border-color:var(--toolline);background:var(--tool)} .ob-gate.pass .gs{color:var(--accent)}
+  .ob-gate.pend .gs{color:var(--muted)}
+  .ob-gate.lock{opacity:.5} .ob-gate.lock .gs{color:var(--muted)}
+  .ob-line{border-left:1px solid var(--line);margin:6px 0 14px 6px;padding-left:14px}
+  .ob-ev{position:relative;padding-bottom:11px;font-size:12px}
+  .ob-ev:before{content:"";position:absolute;left:-18px;top:3px;width:7px;height:7px;border-radius:99px;background:var(--accent);border:1px solid var(--accent)}
+  .ob-ev b{color:var(--text)} .ob-ev span{color:var(--muted)}
+  .ob-promote{display:flex;flex-wrap:wrap;gap:8px}
+  .ob-promote button{border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:8px;padding:8px 12px;font:13px inherit;cursor:pointer}
+  .ob-promote button:hover{border-color:var(--accent)}
+  .ob-promote button.arch{color:#ff9aa6}
+  @media (max-width:980px){ .ob-cols{grid-template-columns:1fr} }
   /* skills module */
   .tabcount{display:inline-block;min-width:17px;text-align:center;font-size:10px;font-weight:700;
        color:#04130d;background:var(--accent);border-radius:999px;padding:1px 5px;margin-left:5px}
@@ -152,35 +253,197 @@
   .sk-card .ds{color:var(--muted);font-size:13px;margin-top:10px;line-height:1.55}
   .sk-card .ft{margin-top:12px;font-size:11px;color:var(--accent2)}
   .sk-card.on .ft{color:var(--accent)}
+  /* top breadcrumb */
+  .crumb{display:flex;align-items:baseline;gap:9px;margin-left:6px}
+  .crumb b{font-weight:600} .crumb span{color:var(--muted);font-size:12px}
+  /* left rail nav (Ask/Lab/Live + library) */
+  aside.rail{display:flex;flex-direction:column;padding:12px 12px 14px}
+  .nav-group{padding:8px 0 12px;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .nav-label{color:var(--muted);font-size:10.5px;text-transform:lowercase;letter-spacing:.4px;margin:2px 6px 8px}
+  .nav2{width:100%;display:flex;align-items:center;gap:10px;padding:8px 9px;margin:2px 0;border:1px solid transparent;border-radius:9px;color:var(--text);text-align:left}
+  .nav2:hover{background:var(--panel2)}
+  .nav2.active{background:var(--panel2);border-color:var(--line)}
+  .nav2 .ni{width:22px;text-align:center;font-size:15px;flex:0 0 22px;filter:grayscale(.2)}
+  .nav2 .nt{flex:1;min-width:0;line-height:1.2}
+  .nav2 .nt b{display:block;font-weight:600;font-size:13px}
+  .nav2 .nt small{display:block;color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nav2 .nb{font-size:10px;font-family:ui-monospace,monospace;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+  .nav2.active .nt small{color:var(--muted)}
+  .ask-ctx{flex:1;min-height:0;overflow-y:auto}
+  .ask-ctx .newchat{margin-bottom:6px}
+  .nav-foot{margin-top:auto;padding-top:10px}
+  .mode-pill{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);background:var(--panel2);border-radius:8px;padding:7px 10px;margin-top:7px;font-family:ui-monospace,monospace;font-size:11px}
+  .mode-pill .k{color:var(--muted)} .mode-pill .v{color:var(--text)} .mode-pill .v.off{color:#ff9aa6}
+  /* lab sub-nav */
+  #labBar{display:none;gap:6px;padding:12px 18px 0}
+  .labtab{padding:6px 13px;border-radius:8px;color:var(--muted);font-weight:600;border:1px solid transparent}
+  .labtab.active{color:var(--text);background:var(--panel2);border-color:var(--line)}
+  .labtab:hover:not(.active){color:var(--text)}
+  /* lab dashboard (hypotheses) */
+  #labHypoView{display:none;flex:1;overflow-y:auto;padding:20px 24px}
+  .lab-section-h{display:flex;justify-content:space-between;align-items:baseline;font-weight:600;font-size:14px;margin:6px 2px 10px}
+  .lab-section-h .mut,.panel-h .mut{color:var(--muted);font-size:11px;font-weight:400}
+  .gates-flow{display:flex;align-items:stretch;flex-wrap:wrap;gap:0}
+  .gflow-arrow{display:flex;align-items:center;padding:0 9px;color:var(--muted);font-family:ui-monospace,monospace}
+  .gbox{flex:1;min-width:190px;border:1px solid var(--line);background:var(--panel2);border-radius:11px;padding:12px 14px}
+  .gbox.cur{border-color:var(--accent2);box-shadow:inset 0 0 0 1px var(--accent2)}
+  .gbox.pass{border-color:var(--toolline)}
+  .gbox.lock{opacity:.5}
+  .gbox .gstep{color:var(--muted);font-family:ui-monospace,monospace;font-size:11px;margin-bottom:4px}
+  .gbox .gttl{font-weight:600;font-size:13px;margin-bottom:4px}
+  .gbox .grule{color:var(--muted);font-size:11px;line-height:1.5}
+  .gbox .grule .mono{color:var(--text);font-family:ui-monospace,monospace}
+  .lab-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px;margin-top:16px}
+  .panel{border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:16px;min-width:0}
+  .panel-h{display:flex;justify-content:space-between;align-items:baseline;font-weight:600;font-size:14px;margin-bottom:12px}
+  .calib{height:170px;border:1px solid var(--line);border-radius:9px;background:var(--bg);position:relative;margin:6px 0;overflow:hidden}
+  .calib .diag{position:absolute;left:6%;bottom:6%;width:88%;height:1px;background:var(--muted);opacity:.4;transform:rotate(-45deg);transform-origin:left center}
+  .calib .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;text-align:center;padding:16px;line-height:1.6}
+  .lab-kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12.5px;margin:10px 0 14px}
+  .lab-kv dt{color:var(--muted)} .lab-kv dd{margin:0;color:var(--text);font-family:ui-monospace,monospace;word-break:break-word}
+  .v-pos{color:var(--accent);font-weight:700} .v-neg{color:#ff9aa6;font-weight:700}
+  /* in-composer skill picker (+ menu) */
+  .composer{position:relative}
+  .plusbtn{flex:0 0 auto;width:44px;height:44px;border:1px solid var(--line);background:var(--panel2);border-radius:12px;color:var(--text);font-size:20px;line-height:1}
+  .plusbtn:hover{border-color:var(--accent)}
+  .skillpop{position:absolute;left:clamp(16px,6vw,48px);bottom:70px;width:340px;max-width:calc(100% - 40px);
+       max-height:48vh;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+       box-shadow:0 16px 48px rgba(0,0,0,.55);padding:8px;display:none;z-index:30}
+  .skillpop.open{display:block}
+  .pop-h{display:flex;justify-content:space-between;align-items:center;padding:6px 8px 8px;color:var(--muted);
+       font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .pop-h a{color:var(--accent2);cursor:pointer;text-transform:none;letter-spacing:0}
+  .pop-h a:hover{color:var(--accent)}
+  .poprow{display:flex;gap:10px;align-items:flex-start;padding:9px 8px;border-radius:10px;cursor:pointer}
+  .poprow:hover{background:var(--panel2)}
+  .poprow .pcheck{width:18px;height:18px;border:1px solid var(--line);border-radius:6px;flex:0 0 18px;
+       display:flex;align-items:center;justify-content:center;font-size:12px;color:transparent;margin-top:1px}
+  .poprow.on .pcheck{background:var(--accent);border-color:var(--accent);color:#04130d}
+  .poprow .pnm{font-weight:600;font-size:13px}
+  .poprow .pds{color:var(--muted);font-size:11.5px;line-height:1.45;margin-top:2px;
+       display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  @media(max-width:1100px){.lab-row{grid-template-columns:1fr}}
+  /* live + eval views */
+  #liveView,#evalView{display:none;flex:1;overflow-y:auto;padding:22px 24px}
+  .live-gate{border:1px solid var(--line);background:var(--panel2);border-radius:12px;overflow:hidden;max-width:520px}
+  .lg-row{display:flex;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--line);font-size:13px}
+  .lg-row:last-child{border-bottom:0} .lg-row span:first-child{color:var(--muted)}
+  .lg-off{color:#ff9aa6;font-weight:700}
+  .lg-row .mono{font-family:ui-monospace,monospace;color:var(--text)}
+  .evalbox{border:1px solid var(--line);background:var(--panel2);border-radius:12px;padding:16px;
+       font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text);white-space:pre-wrap;overflow-x:auto}
 </style>
 </head>
 <body>
   <div class="topnav">
-    <div class="brand"><div class="logo"></div> polyagents</div>
-    <div class="tabs">
-      <div class="tab active" id="tab-chat" onclick="showTab('chat')">Chat</div>
-      <div class="tab" id="tab-market" onclick="showTab('market')">Market</div>
-      <div class="tab" id="tab-skills" onclick="showTab('skills')">Skills <span class="tabcount" id="skillCount">0</span></div>
-      <div class="tab" id="tab-backtest" onclick="showTab('backtest')">Backtest</div>
-    </div>
+    <div class="brand"><div class="logo"></div> aihf</div>
+    <div class="crumb"><b id="crumbMode">Ask</b><span id="crumbSub">read-only · scan / explain</span></div>
     <div class="spacer"></div>
     <div class="badge">● paper mode</div>
   </div>
 
   <div class="app">
-    <!-- LEFT: new chat + skills + history -->
-    <aside class="left">
-      <button class="newchat" onclick="newChat()">＋ New chat</button>
-      <div class="label">Active skills <span class="manage" onclick="showTab('skills')">manage →</span></div>
-      <div id="skillsSummary"></div>
-      <div class="label">MCP servers</div>
-      <div id="mcp"></div>
-      <div class="label">Chat history</div>
-      <div class="hist" id="hist">This conversation</div>
+    <!-- LEFT RAIL: modes (Ask/Lab/Live) + library, prototype IA -->
+    <aside class="left rail">
+      <div class="nav-group">
+        <div class="nav-label">modes · side-effect scope</div>
+        <button class="nav2 active" id="nav-ask" onclick="showView('ask')">
+          <span class="ni">💬</span><span class="nt"><b>Ask</b><small>read-only · chat</small></span></button>
+        <button class="nav2" id="nav-lab" onclick="showView('lab')">
+          <span class="ni">🧪</span><span class="nt"><b>Lab</b><small>sandbox · strategy / backtest</small></span></button>
+        <button class="nav2" id="nav-live" onclick="showView('live')">
+          <span class="ni">⚡</span><span class="nt"><b>Live</b><small>real money · gated</small></span><span class="nb">off</span></button>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">library</div>
+        <button class="nav2" id="nav-objects" onclick="showView('objects')">
+          <span class="ni">▦</span><span class="nt"><b>Objects</b><small>hypo / strat / positions</small></span><span class="nb" id="navObjCt"></span></button>
+        <button class="nav2" id="nav-markets" onclick="showView('markets')">
+          <span class="ni">📈</span><span class="nt"><b>Markets</b><small>polymarket</small></span></button>
+        <button class="nav2" id="nav-eval" onclick="showView('eval')">
+          <span class="ni">◎</span><span class="nt"><b>Evaluation</b><small>brier · ece · baseline</small></span></button>
+      </div>
+
+      <div class="nav-foot">
+        <div class="mode-pill"><span class="k">engine</span><span class="v">LangGraph + claude</span></div>
+        <div class="mode-pill"><span class="k">live trading</span><span class="v off">disabled</span></div>
+      </div>
     </aside>
 
-    <!-- CENTER: chat + market views -->
+    <!-- MIDDLE LIST: Ask context — chat history (prototype-style), only in Ask -->
+    <aside class="list" id="askList">
+      <div class="list-head">
+        <h2 id="listTitle">Ask</h2>
+        <p id="listSub">read-only · agent explains, never trades</p>
+        <div class="list-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="convSearch" placeholder="search conversations…" oninput="onListSearch()" />
+        </div>
+      </div>
+      <div class="list-scroll">
+        <button class="list-new" id="listNew" onclick="newChat()">＋ New chat</button>
+        <div id="listSkills">
+          <div class="hgroup">Active skills <span class="manage" onclick="showView('skills')">manage →</span></div>
+          <div id="skillsSummary"></div>
+        </div>
+        <div id="convList"></div>
+      </div>
+    </aside>
+
+    <!-- CENTER: views -->
     <div class="center">
+      <div id="labBar">
+        <button class="labtab active" id="labtab-hypo" onclick="showLab('hypo')">Hypotheses</button>
+        <button class="labtab" id="labtab-strategy" onclick="showLab('strategy')">Strategy</button>
+        <button class="labtab" id="labtab-backtest" onclick="showLab('backtest')">Backtest</button>
+      </div>
+
+      <div id="labHypoView">
+        <div class="st-top">
+          <div>
+            <h1 class="sk-title">Lab</h1>
+            <p class="sk-lead">沙盒:造假设、回测、训校准器。无真钱,但 PIT 纪律照旧。对象进 Live 前必须先过两道评估门。<b>假设为真实对象,落 SQLite。</b></p>
+          </div>
+          <button class="send" style="height:38px" onclick="newLabHypothesis()">＋ New hypothesis</button>
+        </div>
+
+        <div class="lab-section-h">Promotion gates · 对象状态机 <span class="mut">每道门是确定性规则,不是 LLM 判断</span></div>
+        <div class="gates-flow" id="labGates"></div>
+
+        <div class="cards" id="labMetrics" style="margin-top:16px"></div>
+
+        <div class="lab-row">
+          <div class="panel">
+            <div class="panel-h"><span>Selected hypothesis · <span id="labSelId">—</span></span><span id="labSelState"></span></div>
+            <div id="labSelBody"><div class="hist">选左侧一个假设查看详情与回测。</div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-h"><span>Calibration curve</span></div>
+            <div class="calib"><div class="diag"></div><div class="ph" id="labCalibPh">尚无校准数据 — 需评估账本 (#2 bootstrap CI) 接入后绘制。</div></div>
+            <div class="panel-h" style="margin-top:14px">Lineage</div>
+            <div id="labLineage"><div class="hist">—</div></div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-h"><span>Historical backtest · alpha over resolved markets <span class="mut" id="btSlice"></span></span></div>
+          <div class="st-controls" style="margin-bottom:12px">
+            <label>Signal <select id="btSignal"><option value="momentum">momentum</option><option value="naive">naive (=market)</option></select></label>
+            <label>Predict at <select id="btFrac"><option value="0.4">40%</option><option value="0.5" selected>50%</option><option value="0.6">60%</option></select></label>
+            <label>Max markets <select id="btMax"><option>20</option><option selected>30</option><option>50</option></select></label>
+            <button class="send" style="height:38px" id="btRun" onclick="runHistBacktest()">▶ Run backtest</button>
+          </div>
+          <div id="btResult"><div class="hist">对该 slice 的已结算市场做 PIT 历史回放,评 alpha(确定性价格 signal vs 市场基线 + bootstrap CI)。无 LLM 成本,数据充足。</div></div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-h"><span>Hypotheses · all</span><span class="mut" id="labHypoCount"></span></div>
+          <table class="mkt">
+            <thead><tr><th>ID</th><th>Statement</th><th>Slice</th><th>State</th><th>Brier Δ</th><th>ECE</th><th>n</th><th>Next</th></tr></thead>
+            <tbody id="labHypoBody"><tr><td colspan="8" class="hist">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
       <div id="chatView">
       <div id="log"><div class="wrap">
         <div class="empty" id="empty">
@@ -194,7 +457,10 @@
           </div>
         </div>
       </div></div>
-      <div class="composer"><div class="crow">
+      <div class="composer">
+        <div class="skillpop" id="skillPop"></div>
+        <div class="crow">
+        <button class="plusbtn" id="plusBtn" onclick="toggleSkillPop(event)" title="Add skills">＋</button>
         <textarea id="input" rows="1" placeholder="Message the trading agent…"></textarea>
         <button class="send" id="send">Send</button>
       </div></div>
@@ -215,6 +481,102 @@
         <div id="btbody"><div class="hist">Click “run backtest”. Needs candle history in the DB and the qlib venv.</div></div>
       </div>
 
+      <div id="strategyView">
+        <div class="st-top">
+          <div>
+            <h1 class="sk-title">Strategy</h1>
+            <p class="sk-lead">A supervisor (main agent) runs an <b>agent loop</b>, dispatching specialist sub-agents over the live engine. Watch them run end-to-end.</p>
+          </div>
+        </div>
+        <div class="st-controls">
+          <label>Market <select id="stMarket"><option value="">most active</option></select></label>
+          <label>Strategy <select id="stStrategy">
+            <option value="research">research · data only</option>
+            <option value="signal">signal · data + signal</option>
+            <option value="full" selected>full · data + signal + risk</option>
+            <option value="trade">trade · + execution (dry-run)</option>
+          </select></label>
+          <label>Router <select id="stRouter">
+            <option value="seq" selected>Sequential (fixed plan)</option>
+            <option value="llm">LLM (Claude decides)</option>
+          </select></label>
+          <button class="send" id="stRun" onclick="runStrategy()">▶ Run</button>
+        </div>
+        <div id="stHeader" class="st-header"></div>
+        <div class="st-flow" id="stFlow"></div>
+        <div id="stFinal"></div>
+      </div>
+
+      <div id="objectsView">
+        <div class="st-top">
+          <div>
+            <h1 class="sk-title">Objects</h1>
+            <p class="sk-lead">系统全部复杂度压在 5 个对象上。每个带 version + snapshot_id + lineage，沿状态机单向晋升，每道门是确定性规则。<b>真实数据，落 SQLite。</b></p>
+          </div>
+        </div>
+
+        <div class="ob-machine">
+          <span class="ob-st draft">draft</span><span class="ob-arrow">─ gate1 ▸</span>
+          <span class="ob-st lab">lab</span><span class="ob-arrow">─ gate2 ▸</span>
+          <span class="ob-st paper">paper</span><span class="ob-arrow">─ gate3 ▸</span>
+          <span class="ob-st live">live</span>
+          <span class="ob-arrow" style="opacity:.5">└▸</span><span class="ob-st arch">archived</span>
+        </div>
+        <div class="ob-gatekeys">
+          <span><b>gate1</b> Ask→Hypothesis · 人工点击</span>
+          <span><b>gate2</b> →paper · <span class="mono">brier CI 下界&gt;0 · ece&lt;0.04 · n≥30</span>（需评估账本）</span>
+          <span><b>gate3</b> →live · 风控 + 人工批准</span>
+        </div>
+
+        <div class="ob-cols">
+          <div class="ob-left">
+            <div class="ob-new">
+              <div class="ob-new-h">＋ New hypothesis <span class="mono" id="obCounts"></span></div>
+              <input id="obStmt" placeholder="假设陈述，例如：crypto 新闻事件后 LLM 概率更新快于市场" />
+              <div class="ob-new-row">
+                <input id="obCat" placeholder="category (crypto / politics …)" />
+                <input id="obFeat" placeholder="features 逗号分隔 (news_event, rag_similar)" />
+              </div>
+              <button class="send" id="obCreate" onclick="createHypothesis()">Create (state=draft)</button>
+            </div>
+            <table class="mkt ob-table">
+              <thead><tr><th>ID</th><th>Title</th><th>State</th><th>v</th></tr></thead>
+              <tbody id="obBody"><tr><td colspan="4" class="hist">Loading…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="ob-detail" id="obDetail">
+            <div class="hist">选一个对象查看 lineage、门状态与晋升操作。</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="liveView">
+        <div class="st-top">
+          <div>
+            <h1 class="sk-title">Live</h1>
+            <p class="sk-lead">实盘默认<b>关闭</b>。加 Live = 挂一个 <span class="mono">LiveCLOBExecutionAdapter</span> + 收紧权限,<b>不改核心</b>。每个动作必须命中已批准的 Strategy 并过风控门（gate3）。</p>
+          </div>
+        </div>
+        <div class="live-gate">
+          <div class="lg-row"><span>live trading</span><span class="lg-off">disabled</span></div>
+          <div class="lg-row"><span>execution mode</span><span class="mono">paper</span></div>
+          <div class="lg-row"><span>gate3 (paper→live)</span><span class="mono">needs eval + 人工批准</span></div>
+        </div>
+        <div class="label" style="margin-top:18px">Connected MCP servers</div>
+        <div id="mcp"></div>
+      </div>
+
+      <div id="evalView">
+        <div class="st-top">
+          <div>
+            <h1 class="sk-title">Evaluation</h1>
+            <p class="sk-lead">与 L1–L4 平级的一等子系统:我们的 p_cal 是否跑赢市场 baseline?（Brier / log-loss / ECE,按类别分层。)</p>
+          </div>
+          <button class="send" style="height:38px" onclick="loadEval()">↻ run</button>
+        </div>
+        <pre id="evalBody" class="evalbox">Click “run” to score resolved predictions vs the market baseline.</pre>
+      </div>
+
       <div id="skillsView">
         <div class="sk-top">
           <div>
@@ -228,7 +590,7 @@
     </div>
 
     <!-- RIGHT: portfolio -->
-    <aside class="right">
+    <aside class="right" id="rightPanel">
       <div class="total">Paper equity <span class="refresh" onclick="loadPortfolio()">⟳ refresh</span><b id="equity">$—</b></div>
       <div style="margin-top:14px">
         <div class="stat"><span>Cash</span><span class="v" id="cash">$—</span></div>
@@ -297,10 +659,39 @@ function renderSkillsSummary(){
   const chosen = allSkills.filter(s => selected.has(s.id));
   el.innerHTML = chosen.length
     ? chosen.map(s => `<div class="schip"><span class="dot"></span>${esc(s.name||s.id)}</div>`).join('')
-    : '<div class="none">None selected — open the Skills tab to choose.</div>';
-  document.getElementById('skillCount').textContent = chosen.length;
-  document.getElementById('skSelCount').textContent = chosen.length;
+    : '<div class="none">None selected — open Skills (manage) to choose.</div>';
+  const sc = document.getElementById('skSelCount'); if(sc) sc.textContent = chosen.length;
 }
+
+// ---- in-composer skill picker (+ menu) ----
+function renderSkillPop(){
+  const el = document.getElementById('skillPop');
+  el.innerHTML = '<div class="pop-h"><span>Skills</span><a onclick="document.getElementById(\'skillPop\').classList.remove(\'open\');showView(\'skills\')">Manage all →</a></div>'+
+    (allSkills.length ? allSkills.map(s =>
+      `<div class="poprow ${selected.has(s.id)?'on':''}" onclick="toggleSkillFromPop(event,'${esc(s.id)}')">
+        <div class="pcheck">✓</div>
+        <div><div class="pnm">${esc(s.name||s.id)}</div><div class="pds">${esc(s.description||'')}</div></div>
+      </div>`).join('') : '<div class="hist" style="padding:10px">No skills found.</div>');
+}
+function toggleSkillPop(e){
+  e.stopPropagation();
+  const el = document.getElementById('skillPop');
+  if(el.classList.toggle('open')) renderSkillPop();
+}
+function toggleSkillFromPop(e, id){
+  e.stopPropagation();                       // keep the popover open while toggling
+  if(selected.has(id)) selected.delete(id); else selected.add(id);
+  e.currentTarget.classList.toggle('on');
+  renderSkillsSummary(); renderSkillGrid();
+}
+document.addEventListener('click', e => {
+  const el = document.getElementById('skillPop');
+  if(el && el.classList.contains('open') && !el.contains(e.target) && e.target.id !== 'plusBtn')
+    el.classList.remove('open');
+});
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape') document.getElementById('skillPop').classList.remove('open');
+});
 
 // ---- portfolio ----
 async function loadPortfolio(){
@@ -325,7 +716,56 @@ function esc(s){ return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>'
 
 // ---- chat ----
 function quick(el){ input.value = el.textContent; send(); }
-function newChat(){ history=[]; log.innerHTML=''; const e=document.createElement('div'); }
+// ---- conversation history (prototype-style grouped cards) ----
+let conversations = [];      // [{id, title, ts, messages:[...]}]
+let activeConvId = null;     // id of a loaded saved conversation, or null for a fresh one
+function convTitle(msgs){
+  const u = msgs.find(m => m.role==='user');
+  return u ? u.content.slice(0,64) : 'New conversation';
+}
+function saveCurrent(){
+  if(!history.length) return;
+  const rec = {id: activeConvId || ('c'+Date.now()), title: convTitle(history),
+               ts: Date.now(), messages: history.slice()};
+  const i = conversations.findIndex(c => c.id===rec.id);
+  if(i>=0) conversations[i] = rec; else conversations.unshift(rec);
+}
+function newChat(){
+  saveCurrent();
+  history = []; activeConvId = null; log.innerHTML = '';
+  log.innerHTML = '<div class="empty" id="empty"><h2>What should we trade today?</h2>'+
+    '<div>Pick skills (manage), then ask me to scan, analyse, size, or review.</div></div>';
+  renderConvs(); input.focus();
+}
+function loadConv(id){
+  if(id==='__current') return;
+  saveCurrent();
+  const c = conversations.find(x => x.id===id); if(!c) return;
+  history = c.messages.slice(); activeConvId = id;
+  log.innerHTML = '';
+  history.forEach(m => addMsg(m.role==='user'?'user':'assistant', m.content));
+  renderConvs(); showView('ask');
+}
+function convCard(c, active){
+  const reply = (c.messages.find(m => m.role==='assistant')||{}).content || '…';
+  return `<button class="conv ${active?'active':''}" onclick="loadConv('${c.id}')">
+    <div class="ctop"><b>${esc(c.title)}</b><span class="cm">${c.messages.length} msg</span></div>
+    <div class="cd">${esc(reply.slice(0,90))}</div></button>`;
+}
+function renderConvs(){
+  const el = document.getElementById('convList'); if(!el) return;
+  const q = (document.getElementById('convSearch').value||'').toLowerCase();
+  let html = '<div class="hgroup">Today</div>';
+  let any = false;
+  if(activeConvId===null && history.length){
+    html += convCard({id:'__current', title:convTitle(history)+' · current', messages:history}, true);
+    any = true;
+  }
+  const saved = conversations.filter(c => c.title.toLowerCase().includes(q));
+  if(saved.length){ html += saved.map(c => convCard(c, c.id===activeConvId)).join(''); any = true; }
+  if(!any) html += '<div class="hist">No conversations yet — start chatting below.</div>';
+  el.innerHTML = html;
+}
 input.addEventListener('input', () => { input.style.height='auto'; input.style.height=Math.min(input.scrollHeight,150)+'px'; });
 input.addEventListener('keydown', e => { if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
 sendBtn.onclick = send;
@@ -376,22 +816,405 @@ async function send(){
   history.push({role:'assistant', content:acc});
   busy=false; sendBtn.disabled=false; input.focus();
   loadPortfolio();                              // refresh after each turn
+  renderConvs();                                // update the history list
 }
 
 // ---- market view ----
 let marketRows = [];
 let marketTimer = null;
-function showTab(t){
-  document.getElementById('chatView').style.display = t==='chat' ? 'flex' : 'none';
-  document.getElementById('marketView').style.display = t==='market' ? 'block' : 'none';
-  document.getElementById('backtestView').style.display = t==='backtest' ? 'block' : 'none';
-  document.getElementById('skillsView').style.display = t==='skills' ? 'block' : 'none';
-  document.getElementById('tab-chat').classList.toggle('active', t==='chat');
-  document.getElementById('tab-market').classList.toggle('active', t==='market');
-  document.getElementById('tab-skills').classList.toggle('active', t==='skills');
-  document.getElementById('tab-backtest').classList.toggle('active', t==='backtest');
+// IA: modes (ask/lab/live) + library (objects/markets/eval). Skills nested under Ask.
+const CRUMBS = {
+  ask:{m:'Ask',s:'read-only · scan / explain'}, lab:{m:'Lab',s:'sandbox · strategy / backtest'},
+  live:{m:'Live',s:'real money · gated'}, objects:{m:'Objects',s:'5 types · version + lineage'},
+  markets:{m:'Markets',s:'polymarket · live'}, eval:{m:'Evaluation',s:'brier · ece · baseline'},
+  skills:{m:'Skills',s:'configure the Ask agent'},
+};
+let labSub = 'hypo';               // which Lab sub-view is active (hypo|strategy|backtest)
+let curView = 'ask';
+
+function showView(v){
+  curView = v;
+  const labOn = v==='lab';
+  const show = (id,on,disp='block') => { const e=document.getElementById(id); if(e) e.style.display = on?disp:'none'; };
+  show('chatView', v==='ask', 'flex');
+  show('marketView', v==='markets');
+  show('objectsView', v==='objects');
+  show('liveView', v==='live');
+  show('evalView', v==='eval');
+  show('skillsView', v==='skills');
+  show('labHypoView', labOn && labSub==='hypo');
+  show('strategyView', labOn && labSub==='strategy');
+  show('backtestView', labOn && labSub==='backtest');
+  document.getElementById('labBar').style.display = labOn ? 'flex' : 'none';
+  // rail active state
+  ['ask','lab','live','objects','markets','eval'].forEach(k =>
+    document.getElementById('nav-'+k).classList.toggle('active', k===v || (v==='skills'&&k==='ask')));
+  // middle list column shows in Ask (chat history) and Lab (hypotheses); hide portfolio there
+  const withList = (v==='ask' || v==='skills' || v==='lab');
+  document.getElementById('askList').style.display = withList ? 'flex' : 'none';
+  document.getElementById('rightPanel').style.display = withList ? 'none' : 'block';
+  if(withList) renderListColumn(v);
+  const c = CRUMBS[v]||CRUMBS.ask;
+  document.getElementById('crumbMode').textContent = c.m;
+  document.getElementById('crumbSub').textContent = c.s;
+  // per-view loaders
   if(marketTimer){ clearInterval(marketTimer); marketTimer=null; }
-  if(t==='market'){ loadMarkets(); marketTimer = setInterval(loadMarkets, 20000); }
+  if(v==='markets'){ loadMarkets(); marketTimer = setInterval(loadMarkets, 20000); }
+  if(v==='objects'){ loadObjects(); }
+  if(v==='live'){ loadMcp(); }
+  if(labOn){ loadLabHypos(); }
+  if(labOn && labSub==='strategy'){ loadStrategyMarkets(); }
+}
+function showLab(sub){
+  labSub = sub;
+  ['hypo','strategy','backtest'].forEach(s =>
+    document.getElementById('labtab-'+s).classList.toggle('active', s===sub));
+  showView('lab');
+}
+// middle list column is context-sensitive: Ask=conversations, Lab=hypotheses
+function renderListColumn(v){
+  const inLab = (v==='lab');
+  document.getElementById('listTitle').textContent = inLab ? 'Lab' : 'Ask';
+  document.getElementById('listSub').textContent = inLab ? 'sandbox · hypotheses' : 'read-only · agent explains';
+  document.getElementById('convSearch').placeholder = inLab ? 'search hypotheses…' : 'search conversations…';
+  document.getElementById('listSkills').style.display = inLab ? 'none' : 'block';
+  const nb = document.getElementById('listNew');
+  nb.textContent = inLab ? '＋ New hypothesis' : '＋ New chat';
+  nb.onclick = inLab ? newLabHypothesis : newChat;
+  if(inLab) renderLabList(); else renderConvs();
+}
+function onListSearch(){ curView==='lab' ? renderLabList() : renderConvs(); }
+// back-compat: older calls used showTab('chat'|'market'|...)
+function showTab(t){
+  const map = {chat:'ask', market:'markets', strategy:'lab', backtest:'lab',
+               objects:'objects', skills:'skills'};
+  if(t==='strategy'||t==='backtest') return showLab(t);
+  showView(map[t]||t);
+}
+async function loadEval(){
+  const el = document.getElementById('evalBody');
+  el.textContent = 'Scoring resolved predictions vs the market baseline…';
+  try{
+    const r = await (await fetch('/api/evaluation')).json();
+    el.textContent = r.error ? ('⚠ '+r.error) : (r.report || 'no data');
+  }catch(e){ el.textContent = '⚠ '+e; }
+}
+
+// ---- Lab: hypothesis-centric sandbox (real objects) ----
+let labHypos = [], labSelId = null;
+function labBadge(s){ return `<span class="ob-badge ${s}">${esc(s)}</span>`; }
+async function loadLabHypos(){
+  try{
+    const r = await (await fetch('/api/objects?type=hypothesis')).json();
+    labHypos = (r.objects||[]).filter(o => o.type==='hypothesis');
+    renderLabList(); renderLabTable(); renderLabMetrics();
+    if(labHypos.length){ selectLabHypo((labHypos.find(h=>h.id===labSelId)||labHypos[0]).id); }
+    else {
+      document.getElementById('labSelBody').innerHTML='<div class="hist">还没有假设 — 点 ＋ New hypothesis 创建。</div>';
+      document.getElementById('labGates').innerHTML=''; document.getElementById('labLineage').innerHTML='<div class="hist">—</div>';
+      document.getElementById('labSelId').textContent='—'; document.getElementById('labSelState').textContent='';
+    }
+  }catch(e){ document.getElementById('labHypoBody').innerHTML='<tr><td colspan="8" class="hist">failed to load</td></tr>'; }
+}
+function renderLabList(){
+  const el=document.getElementById('convList'); if(!el || curView!=='lab') return;
+  const q=(document.getElementById('convSearch').value||'').toLowerCase();
+  const items=labHypos.filter(h=>(h.title||'').toLowerCase().includes(q));
+  el.innerHTML='<div class="hgroup">Hypotheses</div>'+(items.length?items.map(h=>{
+    const cat=(h.payload&&h.payload.category_filter)?' · '+esc(h.payload.category_filter):'';
+    return `<button class="conv ${h.id===labSelId?'active':''}" onclick="selectLabHypo('${h.id}')">
+      <div class="ctop"><b>${esc((h.title||h.id).slice(0,42))}</b><span class="cm">${esc(h.state)}</span></div>
+      <div class="cd">${esc(h.id)} · v${h.version}${cat}</div></button>`;
+  }).join(''):'<div class="hist">No hypotheses yet.</div>');
+}
+function selectLabHypo(id){
+  labSelId=id; const h=labHypos.find(x=>x.id===id); if(!h) return;
+  renderLabList(); renderLabTable();
+  document.getElementById('labSelId').textContent=h.id;
+  document.getElementById('labSelState').innerHTML=labBadge(h.state);
+  const cat=(h.payload&&h.payload.category_filter)?h.payload.category_filter:'all';
+  const bs=document.getElementById('btSlice'); if(bs) bs.textContent='· slice: '+cat;
+  renderLabGates(h); renderLabDetail(h); renderLabLineage(h);
+}
+function renderLabGates(h){
+  const g=h.gates||{};
+  const box=(step,ttl,rule,cls)=>`<div class="gbox ${cls}"><div class="gstep">${step}</div><div class="gttl">${ttl}</div><div class="grule">${rule}</div></div>`;
+  document.getElementById('labGates').innerHTML=
+    box('gate 1 · Ask → Hypothesis','用户显式点击','人工门 · 草稿进 Lab', g.g1?'pass':'cur')+
+    '<div class="gflow-arrow">→</div>'+
+    box('gate 2 · Hypothesis → paper','评估门','<span class="mono">forward_n ≥ 30 · brier CI 下界 &gt; 0 · ece &lt; 0.04</span>', g.g2?'pass':(g.g1?'cur':'lock'))+
+    '<div class="gflow-arrow">→</div>'+
+    box('gate 3 · paper → Live','风控门 + 人工','<span class="mono">apy &gt; min · max_dd &lt; lim · manual</span>', g.g3?'pass':'lock');
+}
+function renderLabDetail(h){
+  const p=h.payload||{}, es=h.eval_summary;
+  const feats=(p.feature_set&&p.feature_set.length)?p.feature_set.join(', '):'—';
+  let verdict = '<span class="mut">未跑 alpha 测试。点 ▶ Run alpha test 评分 vs 市场 baseline。</span>';
+  const bt = es && es.n>0
+    ? `$ alpha_test --hypothesis ${h.id} --slice ${p.category_filter||'all'} --baseline market\n`+
+      `settled: ${es.n}\nbrier_model: ${es.brier_model.toFixed(3)} · brier_market: ${es.brier_market.toFixed(3)}\n`+
+      `brier_delta: ${es.brier_delta.toFixed(3)} · bootstrap 95% CI [${es.brier_delta_ci[0].toFixed(3)}, ${es.brier_delta_ci[1].toFixed(3)}]\n`+
+      `ece: ${es.ece.toFixed(3)} · n≥30: ${es.sample_adequate}\n`+
+      `verdict: ${es.beats_market ? 'BEATS_MARKET (CI 全在 0 以下)' : 'NO EDGE (CI 含 0 或更差)'}`
+    : (es && es.n===0
+        ? `alpha_test: 该 slice (${p.category_filter||'all'}) 下暂无已结算预测。\n先在 Ask/Strategy 里分析市场、待其结算后再测。`
+        : '尚无 alpha 测试结果。');
+  if(es && es.n>0){
+    verdict = es.beats_market
+      ? `<span class="v-pos">✅ BEATS MARKET</span> · brier Δ ${es.brier_delta.toFixed(3)} CI [${es.brier_delta_ci[0].toFixed(3)},${es.brier_delta_ci[1].toFixed(3)}] · n=${es.n}`
+      : `<span class="v-neg">❌ NO EDGE</span> · brier Δ ${es.brier_delta.toFixed(3)} CI [${es.brier_delta_ci[0].toFixed(3)},${es.brier_delta_ci[1].toFixed(3)}] · n=${es.n}${es.sample_adequate?'':' (样本不足)'}`;
+  } else if(es && es.n===0){ verdict = '<span class="mut">该 slice 暂无已结算预测 — 样本不足。</span>'; }
+  const proms=(h.next_states||[]).map(s=>`<button class="${s==='archived'?'arch':''}" onclick="promoteLabHypo('${h.id}','${s}')">promote → ${s}</button>`).join('');
+  document.getElementById('labSelBody').innerHTML=
+    `<p style="margin:0 0 12px;color:var(--text)">"${esc(p.statement||h.title||'')}"</p>
+     <dl class="lab-kv">
+       <dt>version</dt><dd>${h.version}</dd>
+       <dt>snapshot_id</dt><dd>${esc(h.snapshot_id)}</dd>
+       <dt>slice</dt><dd>${esc(p.category_filter||'all')}</dd>
+       <dt>feature_set</dt><dd>${esc(feats)}</dd>
+       <dt>model_version</dt><dd>${esc(p.model_version||'—')}</dd>
+     </dl>
+     <div class="panel-h" style="font-size:13px"><span>Alpha test · 是否跑赢市场</span>
+       <button class="send" style="height:30px;padding:0 12px" id="alphaBtn" onclick="runAlphaTest('${h.id}')">▶ Run alpha test</button></div>
+     <div style="margin:0 0 10px;font-size:13px">${verdict}</div>
+     <pre class="evalbox">${esc(bt)}</pre>
+     <div class="ob-promote" style="margin-top:12px">${proms}</div>`;
+}
+function renderLabLineage(h){
+  const ev=(h.lineage&&h.lineage.events)||[];
+  document.getElementById('labLineage').innerHTML = ev.length
+    ? `<div class="ob-line">${ev.map(e=>`<div class="ob-ev"><b>${esc(e.from_state)} → ${esc(e.to_state)}</b><span> · ${esc(e.promoted_by)}</span></div>`).join('')}</div>`
+    : '<div class="hist">尚无晋升记录(still draft)。</div>';
+}
+function renderLabTable(){
+  const b=document.getElementById('labHypoBody');
+  document.getElementById('labHypoCount').textContent=labHypos.length+' total';
+  if(!labHypos.length){ b.innerHTML='<tr><td colspan="8" class="hist">No hypotheses — create one.</td></tr>'; return; }
+  b.innerHTML=labHypos.map(h=>{
+    const p=h.payload||{}, es=h.eval_summary;
+    const next=h.state==='draft'?'promote to lab':(h.state==='lab'?'accumulate n / eval':(h.state==='paper'?'forward-test':'—'));
+    return `<tr onclick="selectLabHypo('${h.id}')" class="${h.id===labSelId?'active':''}">
+      <td class="mono">${esc(h.id)}</td><td>${esc((h.title||'').slice(0,46))}</td>
+      <td>${esc(p.category_filter||'—')}</td><td>${labBadge(h.state)}</td>
+      <td class="mono">${es?es.brier_delta.toFixed(3):'—'}</td><td class="mono">${es?es.ece.toFixed(3):'—'}</td>
+      <td class="mono">${es?es.n:'—'}</td><td>${next}</td></tr>`;
+  }).join('');
+}
+function renderLabMetrics(){
+  const bs=s=>labHypos.filter(h=>h.state===s).length;
+  const cards=[['active hypotheses',labHypos.length,bs('lab')+' lab · '+bs('paper')+' paper'],
+    ['drafts',bs('draft'),'awaiting gate 1'],['archived',bs('archived'),'killed / decayed'],
+    ['evaluation','—','需 #2 评估账本']];
+  document.getElementById('labMetrics').innerHTML=cards.map(c=>
+    `<div class="card"><div class="k">${c[0]}</div><div class="v">${c[1]}</div><div class="hist" style="padding:0;margin-top:3px">${c[2]}</div></div>`).join('');
+}
+async function newLabHypothesis(){
+  const stmt=prompt('Hypothesis statement (假设陈述):'); if(!stmt) return;
+  const cat=prompt('Category (crypto / politics / …, 可空):')||'';
+  try{
+    const r=await (await fetch('/api/objects',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({statement:stmt, category:cat})})).json();
+    if(r.error){ alert(r.error); return; }
+    labSelId=r.id; loadLabHypos();
+  }catch(e){ alert(e); }
+}
+async function promoteLabHypo(id,to){
+  try{
+    const r=await (await fetch('/api/objects/promote',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id, to_state:to, by:'user:web', evidence:'manual gate (lab)'})})).json();
+    if(r.error){ alert(r.error); return; }
+    labSelId=id; loadLabHypos();
+  }catch(e){ alert(e); }
+}
+async function runHistBacktest(){
+  const h=labHypos.find(x=>x.id===labSelId);
+  const cat=(h&&h.payload)?(h.payload.category_filter||''):'';
+  const btn=document.getElementById('btRun'); btn.disabled=true; btn.textContent='running…';
+  document.getElementById('btResult').innerHTML='<div class="hist">回放已结算市场中…(逐个取价格历史,可能 10–30s)</div>';
+  try{
+    const r=await (await fetch('/api/backtest_replay',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({category:cat||null, signal:document.getElementById('btSignal').value,
+        frac:+document.getElementById('btFrac').value, max_markets:+document.getElementById('btMax').value})})).json();
+    if(r.error){ document.getElementById('btResult').innerHTML='<div class="st-err">⚠ '+esc(r.error)+'</div>'; return; }
+    renderBtResult(r);
+  }catch(e){ document.getElementById('btResult').innerHTML='<div class="st-err">⚠ '+esc(e)+'</div>'; }
+  finally{ btn.disabled=false; btn.textContent='▶ Run backtest'; }
+}
+function renderBtResult(r){
+  const s=r.summary;
+  if(!s||!s.n){ document.getElementById('btResult').innerHTML='<div class="hist">该 slice 暂无足够已结算市场(n=0)。换 category 或放宽 horizon/max。</div>'; return; }
+  const verdict=s.beats_market?'<span class="v-pos">✅ BEATS MARKET</span>':'<span class="v-neg">❌ NO EDGE</span>';
+  document.getElementById('btResult').innerHTML=
+    `<div style="font-size:13px;margin-bottom:8px">${verdict} · signal=<b>${esc(r.signal)}</b> · slice=<b>${esc(r.category||'all')}</b> · n=${s.n}${s.sample_adequate?'':' <span class="mut">(样本不足)</span>'}</div>`+
+    `<pre class="evalbox">brier_model: ${s.brier_model.toFixed(3)} · brier_market: ${s.brier_market.toFixed(3)}\n`+
+    `brier_delta: ${s.brier_delta.toFixed(3)} · bootstrap 95% CI [${s.ci[0].toFixed(3)}, ${s.ci[1].toFixed(3)}]\n`+
+    `ece: ${s.ece.toFixed(3)} · predict@ ${(r.predict_frac*100).toFixed(0)}% · markets replayed: ${r.n_markets}\n`+
+    `PIT: 价格历史切到 prediction_time 之前(已断言无未来泄漏)</pre>`;
+}
+async function runAlphaTest(id){
+  const btn=document.getElementById('alphaBtn'); if(btn){ btn.disabled=true; btn.textContent='testing…'; }
+  try{
+    const r=await (await fetch('/api/objects/alpha_test',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id})})).json();
+    if(r.error){ alert(r.error); }
+    labSelId=id; await loadLabHypos();        // eval_summary now attached → panel + gate2 update
+  }catch(e){ alert(e); }
+}
+
+// ---- objects (5 financial objects + 3-gate state machine, real data) ----
+let objList = [];
+let objActive = null;
+async function loadObjects(){
+  const body = document.getElementById('obBody');
+  try{
+    const r = await (await fetch('/api/objects')).json();
+    if(r.error){ body.innerHTML = '<tr><td colspan="4" class="hist">⚠ '+esc(r.error)+'</td></tr>'; return; }
+    objList = r.objects || [];
+    const c = r.counts || {};
+    document.getElementById('obCounts').textContent =
+      `${c.hypothesis||0} hypo · ${c.strategy||0} strat · ${c.position||0} pos`;
+    const total = Object.values(c).reduce((a,b)=>a+b,0);
+    const nb = document.getElementById('navObjCt'); if(nb) nb.textContent = total||'';
+    if(!objList.length){ body.innerHTML = '<tr><td colspan="4" class="hist">No objects yet — create a hypothesis →</td></tr>'; return; }
+    body.innerHTML = objList.map((o,i) =>
+      `<tr onclick="selectObject(${i})" class="${objActive===o.id?'active':''}">
+        <td class="mono">${esc(o.id)}</td>
+        <td class="q">${esc(o.title.slice(0,60))}</td>
+        <td><span class="ob-badge ${o.state}">${o.state}</span></td>
+        <td class="mono">${o.version}</td></tr>`).join('');
+    if(objActive){ const o = objList.find(x=>x.id===objActive); if(o) renderObjectDetail(o); }
+  }catch(e){ body.innerHTML = '<tr><td colspan="4" class="hist">failed to load</td></tr>'; }
+}
+function selectObject(i){ const o=objList[i]; if(!o) return; objActive=o.id;
+  document.querySelectorAll('#obBody tr').forEach((tr,j)=>tr.classList.toggle('active',j===i));
+  renderObjectDetail(o); }
+function gateCard(n, label, state){
+  return `<div class="ob-gate ${state}"><div class="gn">${n}</div><div class="gs">${label}</div></div>`;
+}
+function renderObjectDetail(o){
+  const g = o.gates||{};
+  const ev = (o.lineage&&o.lineage.events)||[];
+  const evHtml = ev.length ? `<div class="ob-line">${ev.map(e=>
+      `<div class="ob-ev"><b>${esc(e.from_state)} → ${esc(e.to_state)}</b>
+       <span> · ${esc(e.promoted_by)}${e.evidence_ref?' · '+esc(e.evidence_ref):''}</span></div>`).join('')}</div>`
+    : '<div class="hist" style="margin:6px 0 12px">尚无晋升记录（still draft）。</div>';
+  const proms = (o.next_states||[]).map(s =>
+      `<button class="${s==='archived'?'arch':''}" onclick="promoteObject('${o.id}','${s}')">promote → ${s}</button>`).join('');
+  const es = o.eval_summary;
+  document.getElementById('obDetail').innerHTML = `
+    <h3>${esc(o.title.slice(0,80))}</h3>
+    <div class="obid">${esc(o.id)} · ${esc(o.type)} · v${o.version} · snapshot ${esc(o.snapshot_id)}</div>
+    <div class="ob-gates">
+      ${gateCard('gate1','左 draft '+(g.g1?'✓':'—'), g.g1?'pass':'pend')}
+      ${gateCard('gate2','eval '+(g.g2?'✓':'pending'), g.g2?'pass':'pend')}
+      ${gateCard('gate3','live '+(g.g3?'✓':'locked'), g.g3?'pass':'lock')}
+    </div>
+    <dl class="ob-kv">
+      <dt>state</dt><dd>${esc(o.state)}</dd>
+      <dt>eval</dt><dd>${es?('brier Δ '+es.brier_delta.toFixed(3)+' · CI ['+es.brier_delta_ci[0].toFixed(3)+','+es.brier_delta_ci[1].toFixed(3)+'] · n='+es.n):'— (需回测/评估账本)'}</dd>
+    </dl>
+    <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">lineage</div>
+    ${evHtml}
+    <div class="ob-promote">${proms || '<span class="hist">终态，无可晋升项。</span>'}</div>`;
+}
+async function createHypothesis(){
+  const stmt = document.getElementById('obStmt').value.trim();
+  if(!stmt){ document.getElementById('obStmt').focus(); return; }
+  const btn = document.getElementById('obCreate'); btn.disabled=true; btn.textContent='creating…';
+  try{
+    const r = await (await fetch('/api/objects',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({statement:stmt, category:document.getElementById('obCat').value,
+        feature_set:document.getElementById('obFeat').value})})).json();
+    if(r.error){ alert(r.error); }
+    else{ document.getElementById('obStmt').value=''; document.getElementById('obCat').value='';
+      document.getElementById('obFeat').value=''; objActive=r.id; await loadObjects(); }
+  }catch(e){} finally{ btn.disabled=false; btn.textContent='Create (state=draft)'; }
+}
+async function promoteObject(id, to){
+  try{
+    const r = await (await fetch('/api/objects/promote',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id, to_state:to, by:'user:web', evidence:'manual gate (web)'})})).json();
+    if(r.error){ alert(r.error); return; }
+    objActive=id; await loadObjects();
+  }catch(e){}
+}
+
+// ---- strategy (multi-agent loop, live) ----
+let stratBusy = false;
+async function loadStrategyMarkets(){
+  const sel = document.getElementById('stMarket');
+  if(sel.dataset.loaded) return;
+  try{
+    const rows = await (await fetch('/api/markets?limit=25')).json();
+    if(Array.isArray(rows)){
+      rows.forEach(r => { if(r.yes_token){ const o=document.createElement('option');
+        o.value=r.yes_token; o.textContent=r.question.slice(0,70); sel.appendChild(o); } });
+      sel.dataset.loaded = '1';
+    }
+  }catch(e){}
+}
+const ST_ICONS = {data:'D', signal:'S', risk:'R', execution:'X'};
+function stStep(agent){
+  const f = document.getElementById('stFlow');
+  if(f.children.length) { const c=document.createElement('div'); c.className='st-conn'; f.appendChild(c); }
+  const d = document.createElement('div'); d.className='st-step run'; d.dataset.agent=agent;
+  d.innerHTML = `<div class="row"><div class="ic">${ST_ICONS[agent]||'?'}</div>
+    <div class="nm">${esc(agent)} agent</div><div class="st-state">running…</div></div>
+    <div class="sm"></div>`;
+  f.appendChild(d); document.getElementById('strategyView').scrollTop = 1e9;
+  return d;
+}
+function runStrategy(){
+  if(stratBusy) return;
+  stratBusy = true;
+  const token = document.getElementById('stMarket').value;
+  const strategy = document.getElementById('stStrategy').value;
+  const router = document.getElementById('stRouter').value==='llm' ? 'llm' : 'seq';
+  const btn = document.getElementById('stRun'); btn.disabled=true; btn.textContent='running…';
+  document.getElementById('stFlow').innerHTML='';
+  document.getElementById('stFinal').innerHTML='';
+  document.getElementById('stHeader').innerHTML = 'starting supervisor… <b>'+(router==='llm'?'LLM router':'sequential')+'</b>';
+  let running = null;
+  fetch('/api/strategy',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token_id:token, strategy, router})}).then(async res => {
+    const reader=res.body.getReader(); const dec=new TextDecoder(); let buf='';
+    while(true){
+      const {value,done}=await reader.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true}); let idx;
+      while((idx=buf.indexOf('\n\n'))>=0){
+        const line=buf.slice(0,idx).trim(); buf=buf.slice(idx+2);
+        if(!line.startsWith('data:')) continue;
+        const ev=JSON.parse(line.slice(5).trim());
+        if(ev.type==='market'){ document.getElementById('stHeader').innerHTML = 'running on <b>'+esc(ev.question)+'</b>'; }
+        else if(ev.type==='agent_start'){ running = stStep(ev.agent); }
+        else if(ev.type==='agent_result'){
+          if(running){ running.classList.remove('run'); running.classList.add(ev.ok?'ok':'bad');
+            running.querySelector('.st-state').textContent = ev.halt?'halt':(ev.ok?'done':'fail');
+            running.querySelector('.sm').textContent = ev.summary||''; running=null; }
+        }
+        else if(ev.type==='final'){ renderStrategyFinal(ev.board); }
+        else if(ev.type==='error'){ document.getElementById('stFinal').innerHTML =
+            '<div class="st-err">⚠ '+esc(ev.message)+'</div>'; }
+      }
+    }
+  }).catch(e => { document.getElementById('stFinal').innerHTML='<div class="st-err">⚠ '+esc(e)+'</div>'; })
+  .finally(() => { stratBusy=false; btn.disabled=false; btn.textContent='▶ Run'; loadPortfolio(); });
+}
+function renderStrategyFinal(board){
+  if(!board || !board.risk){ return; }
+  const r = board.risk; const act = r.action;
+  const pct = x => (x*100).toFixed(1)+'%';
+  document.getElementById('stFinal').innerHTML =
+    `<div class="st-decision ${act}">
+      <div class="dh">decision</div>
+      <div class="da ${act}">${act.toUpperCase()}</div>
+      <div class="dk">
+        <span>edge <b>${(r.edge>=0?'+':'')+pct(r.edge)}</b></span>
+        <span>p_cal <b>${(r.p_cal!=null?r.p_cal.toFixed(3):'—')}</b></span>
+        <span>APY <b>${r.apy!=null?(r.apy>=0?'+':'')+pct(r.apy):'—'}</b></span>
+        <span>size <b>$${fmt(r.size_usdc)}</b></span>
+      </div>
+    </div>`;
 }
 async function loadBacktest(){
   const el = document.getElementById('btbody');
@@ -479,7 +1302,7 @@ async function loadMcp(){
   }catch(e){ el.innerHTML = '<div class="hist">MCP list unavailable</div>'; }
 }
 
-loadSkills(); loadMcp(); loadPortfolio();
+loadSkills(); loadMcp(); loadPortfolio(); loadObjects(); renderConvs(); showView('ask');
 </script>
 </body>
 </html>
