@@ -364,9 +364,10 @@ def _to_lc_messages(history: list[dict]) -> list[tuple[str, str]]:
             for m in history]
 
 
-async def _stream(history: list[dict], skills: list[str]) -> AsyncIterator[str]:
+async def _stream(history: list[dict], skills: list[str],
+                  model: str | None = None) -> AsyncIterator[str]:
     try:
-        agent = build_agent(skills or None)
+        agent = build_agent(skills or None, model=model)
     except Exception as exc:
         yield _sse({"type": "error", "message": f"agent init failed: {exc}"})
         return
@@ -391,4 +392,5 @@ async def chat(request: Request) -> StreamingResponse:
     body = await request.json()
     history = body.get("messages", [])
     skills = body.get("skills", [])
-    return StreamingResponse(_stream(history, skills), media_type="text/event-stream")
+    model = body.get("model")
+    return StreamingResponse(_stream(history, skills, model), media_type="text/event-stream")
