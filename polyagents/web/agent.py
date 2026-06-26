@@ -76,8 +76,17 @@ _TOOL_FUNCS = [
 ]
 
 
-def build_tools() -> list:
-    return [StructuredTool.from_function(fn) for fn in _TOOL_FUNCS]
+# Tools that have a side effect (size/execute/settle/run a strategy). The Ask
+# mode is READ-ONLY per the v0.2 PRD (§二 / §八-B ToolManifest): these must NOT
+# be injected, so a chat in Ask can never place a trade or mutate the portfolio.
+WRITE_TOOLS = {"run_trading_strategy", "size_position", "paper_execute", "settle_markets"}
+
+
+def build_tools(readonly: bool = False) -> list:
+    """The chat tool surface. ``readonly=True`` (Ask mode) drops the write tools
+    in :data:`WRITE_TOOLS`, leaving only scan / snapshot / data / evaluate reads."""
+    funcs = [f for f in _TOOL_FUNCS if not (readonly and f.__name__ in WRITE_TOOLS)]
+    return [StructuredTool.from_function(fn) for fn in funcs]
 
 
 # ----- skills registry -------------------------------------------------------
@@ -182,11 +191,14 @@ def resolve_model(name: str | None) -> str:
     return DEFAULT_CONFIG["anthropic_model"]
 
 
-def build_agent(selected_ids: list[str] | None = None, llm=None, model: str | None = None):
+def build_agent(selected_ids: list[str] | None = None, llm=None, model: str | None = None,
+                readonly: bool = True):
     """Compile the ReAct agent (Claude + tools + selected skills' prompt).
 
     ``model`` (from the Ask composer's selector) is validated against
     :data:`ASK_MODELS`; an unknown / missing value uses the configured default.
+    ``readonly`` defaults to True — the web chat IS the Ask mode, so it gets the
+    read-only tool subset (no trading / portfolio mutation).
     """
     from langgraph.prebuilt import create_react_agent
 
@@ -197,4 +209,4 @@ def build_agent(selected_ids: list[str] | None = None, llm=None, model: str | No
             model=resolve_model(model),
             temperature=DEFAULT_CONFIG.get("anthropic_temperature", 0.0),
         )
-    return create_react_agent(llm, build_tools(), prompt=_compose_prompt(selected_ids))
+    return create_react_agent(llm, build_tools(readonly=readonly), prompt=_compose_prompt(selected_ids))

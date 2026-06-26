@@ -3,7 +3,21 @@ by the acceptance cases in docs/product/ask-module-tests.md."""
 from __future__ import annotations
 
 from polyagents.default_config import DEFAULT_CONFIG
-from polyagents.web.agent import ASK_MODELS, resolve_model
+from polyagents.web.agent import ASK_MODELS, WRITE_TOOLS, build_tools, resolve_model
+
+
+def test_ask_is_readonly_no_write_tools():
+    names = {t.name for t in build_tools(readonly=True)}
+    assert not (names & WRITE_TOOLS), f"Ask must not bind write tools: {names & WRITE_TOOLS}"
+    # the read-only surface still has the things Ask needs
+    for read in ("scan_markets", "market_snapshot", "evaluation_report", "find_similar_markets"):
+        assert read in names
+
+
+def test_write_tools_present_only_in_full_surface():
+    full = {t.name for t in build_tools(readonly=False)}
+    assert WRITE_TOOLS <= full                       # full host surface keeps them
+    assert "paper_execute" in full and "size_position" in full
 
 
 def test_known_model_is_passed_through():
