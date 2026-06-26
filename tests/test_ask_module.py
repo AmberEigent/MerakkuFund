@@ -3,7 +3,32 @@ by the acceptance cases in docs/product/ask-module-tests.md."""
 from __future__ import annotations
 
 from polyagents.default_config import DEFAULT_CONFIG
-from polyagents.web.agent import ASK_MODELS, resolve_model
+from polyagents.web.agent import ASK_MODELS, WRITE_TOOLS, build_tools, resolve_model
+
+
+def test_ask_is_readonly_no_write_tools():
+    names = {t.name for t in build_tools(readonly=True)}
+    assert not (names & WRITE_TOOLS), f"Ask must not bind write tools: {names & WRITE_TOOLS}"
+    # the read-only surface still has the things Ask needs
+    for read in ("scan_markets", "market_snapshot", "evaluation_report", "find_similar_markets"):
+        assert read in names
+
+
+def test_write_tools_present_only_in_full_surface():
+    full = {t.name for t in build_tools(readonly=False)}
+    assert WRITE_TOOLS <= full                       # full host surface keeps them
+    assert "paper_execute" in full and "size_position" in full
+
+
+def test_propose_hypothesis_is_readonly_and_available_in_ask():
+    from polyagents.web.agent import propose_hypothesis
+
+    names = {t.name for t in build_tools(readonly=True)}
+    assert "propose_hypothesis" in names             # Ask can surface ideas
+    assert "propose_hypothesis" not in WRITE_TOOLS    # but it only proposes
+    out = propose_hypothesis("crypto news beats market", category="crypto",
+                             feature_set="news_event")
+    assert isinstance(out, str) and "crypto news beats market" in out
 
 
 def test_known_model_is_passed_through():
