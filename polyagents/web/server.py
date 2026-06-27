@@ -48,6 +48,13 @@ app = FastAPI(title="polyagents chat")
 app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 
 
+def _qlib_python() -> str:
+    configured = DEFAULT_CONFIG.get("qlib_python")
+    if configured and Path(str(configured)).exists():
+        return str(configured)
+    return sys.executable
+
+
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(str(_STATIC / "index.html"))
@@ -114,7 +121,7 @@ async def backtest(forward_bars: int = 5) -> JSONResponse:
     """Run the qlib backtest in the qlib venv (cross-venv) and return metrics +
     an equity curve for the Backtest tab. Factor→model→backtest over the SQLite
     candle history, leakage-safe time split."""
-    py = DEFAULT_CONFIG.get("qlib_python") or sys.executable
+    py = _qlib_python()
     snippet = (
         "import json;from polyagents.mcp_servers.qlib_backtest import run_backtest,data_summary;"
         f"print('@@'+json.dumps({{'summary':data_summary(),'backtest':run_backtest(forward_bars={int(forward_bars)})}}))"
@@ -239,6 +246,15 @@ async def _strategy_stream(token_id: str, strategy: str, use_llm: bool) -> Async
                 emit({"type": "error", "message": f"no market for token_id={token_id!r}"})
                 return
             emit({"type": "market", "question": market.question, "token_id": market.token_id})
+            if strategy != "research" and not os.getenv("ANTHROPIC_API_KEY"):
+                emit({
+                    "type": "error",
+                    "message": (
+                        "Strategy signal/full/trade runs need ANTHROPIC_API_KEY. "
+                        "Use Strategy=research for data-only local demos, or add ANTHROPIC_API_KEY to .env."
+                    ),
+                })
+                return
             router = LLMRouter(eng._get_llm()) if use_llm else None
             bb = run_strategy(market, graph=eng, config=eng.config, strategy=strategy,
                               router=router, on_event=emit)

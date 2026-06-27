@@ -68,8 +68,33 @@ def test_lab_ui_uses_lab_api_contract():
 
     html = Path("polyagents/web/static/index.html").read_text()
 
+    assert "function showLabCreate" in html
+    assert "function submitLabHypothesis" in html
+    assert "prompt(" not in html
+    assert "m.beats_market || m.brier_delta>0" in html
+    assert "review report" in html and "openLabReport" in html
+    assert "本地已结算价格历史" in html
     assert "fetch('/api/lab/hypotheses')" in html
     assert "'/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests'" in html
     assert "'/api/lab/reports/'+encodeURIComponent(r.report_id)" in html
     assert "function renderLabReport" in html
     assert "function runAlphaTest" not in html
+
+
+def test_backtest_python_falls_back_to_current_interpreter(monkeypatch):
+    import sys
+
+    from polyagents.web import server
+
+    monkeypatch.setitem(server.DEFAULT_CONFIG, "qlib_python", "C:\\qlib\\.venv\\Scripts\\python.exe")
+
+    assert server._qlib_python() == sys.executable
+
+
+def test_strategy_missing_api_key_error_is_actionable():
+    from pathlib import Path
+
+    server = Path("polyagents/web/server.py").read_text()
+
+    assert "Strategy signal/full/trade runs need ANTHROPIC_API_KEY" in server
+    assert "Strategy=research" in server

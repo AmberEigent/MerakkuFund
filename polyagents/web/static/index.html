@@ -515,7 +515,19 @@
             <h1 class="sk-title">Lab</h1>
             <p class="sk-lead">沙盒:造假设、回测、训校准器。无真钱,但 PIT 纪律照旧。对象进 Live 前必须先过两道评估门。<b>假设为真实对象,落 SQLite。</b></p>
           </div>
-          <button class="send" style="height:38px" onclick="newLabHypothesis()">＋ New hypothesis</button>
+          <button class="send" style="height:38px" onclick="showLabCreate()">＋ New hypothesis</button>
+        </div>
+
+        <div class="panel" id="labCreatePanel" style="display:none;margin-bottom:16px">
+          <div class="panel-h"><span>New hypothesis</span><button onclick="hideLabCreate()">Cancel</button></div>
+          <div class="st-controls" style="margin-bottom:12px">
+            <label>Category <input id="labNewCategory" value="crypto" /></label>
+            <label>Features <input id="labNewFeatures" value="news_sentiment,similar_markets" /></label>
+          </div>
+          <textarea id="labNewStatement" rows="3" placeholder="Hypothesis statement..." style="width:100%;box-sizing:border-box"></textarea>
+          <div class="st-controls" style="justify-content:flex-end;margin-top:12px">
+            <button class="send" id="labCreateSubmit" onclick="submitLabHypothesis()">Create hypothesis</button>
+          </div>
         </div>
 
         <div class="lab-section-h">Promotion gates · 对象状态机 <span class="mut">每道门是确定性规则,不是 LLM 判断</span></div>
@@ -1103,7 +1115,7 @@ function renderListColumn(v){
   document.getElementById('listSkills').style.display = inLab ? 'none' : 'block';
   const nb = document.getElementById('listNew');
   nb.textContent = inLab ? '＋ New hypothesis' : '＋ New chat';
-  nb.onclick = inLab ? newLabHypothesis : newChat;
+  nb.onclick = inLab ? showLabCreate : newChat;
   if(inLab) renderLabList(); else renderConvs();
 }
 function onListSearch(){ curView==='lab' ? renderLabList() : renderConvs(); }
@@ -1195,7 +1207,7 @@ function renderLabDetail(h){
   const m=(rep && rep.metrics) || h.eval_summary || null;
   const feats=(h.feature_set&&h.feature_set.length)?h.feature_set.join(', '):'—';
   const verdict=m && m.n>0
-    ? ((m.brier_delta<0)?`<span class="v-pos">BEATS MARKET</span> · Δ ${m.brier_delta.toFixed(3)} · n=${m.n}`
+    ? ((m.beats_market || m.brier_delta>0)?`<span class="v-pos">BEATS MARKET</span> · Δ ${m.brier_delta.toFixed(3)} · n=${m.n}`
       : `<span class="v-neg">NO EDGE</span> · Δ ${m.brier_delta.toFixed(3)} · n=${m.n}`)
     : '<span class="mut">尚无 evidence backtest report。</span>';
   const bt = rep
@@ -1234,7 +1246,9 @@ function renderLabTable(){
   if(!labHypos.length){ b.innerHTML='<tr><td colspan="8" class="hist">No hypotheses — create one.</td></tr>'; return; }
   b.innerHTML=labHypos.map(h=>{
     const rep=labLatestReport(h.id), es=(rep&&rep.metrics)||h.eval_summary;
-    const next=rep?'review report':'run backtest';
+    const next=rep
+      ? `<button onclick="event.stopPropagation();openLabReport('${rep.id}')">review report</button>`
+      : '<span class="mut">run evidence</span>';
     return `<tr onclick="selectLabHypo('${h.id}')" class="${h.id===labSelId?'active':''}">
       <td class="mono">${esc(h.id)}</td><td>${esc((h.statement||'').slice(0,46))}</td>
       <td>${esc(h.category_filter||'—')}</td><td>${labBadge(h.state)}</td>
@@ -1251,19 +1265,35 @@ function renderLabMetrics(){
   document.getElementById('labMetrics').innerHTML=cards.map(c=>
     `<div class="card"><div class="k">${c[0]}</div><div class="v">${c[1]}</div><div class="hist" style="padding:0;margin-top:3px">${c[2]}</div></div>`).join('');
 }
-async function newLabHypothesis(){
-  const stmt=prompt('Hypothesis statement (假设陈述):'); if(!stmt) return;
-  const cat=prompt('Category filter (crypto / politics / …):')||'crypto';
-  const features=(prompt('Feature set, comma separated:', 'news_sentiment,similar_markets')||'')
+function showLabCreate(){
+  const panel=document.getElementById('labCreatePanel');
+  if(panel) panel.style.display='block';
+  const input=document.getElementById('labNewStatement');
+  if(input) input.focus();
+}
+function hideLabCreate(){
+  const panel=document.getElementById('labCreatePanel');
+  if(panel) panel.style.display='none';
+}
+async function submitLabHypothesis(){
+  const stmt=(document.getElementById('labNewStatement').value||'').trim();
+  if(!stmt){ document.getElementById('labNewStatement').focus(); return; }
+  const cat=(document.getElementById('labNewCategory').value||'crypto').trim()||'crypto';
+  const features=(document.getElementById('labNewFeatures').value||'')
     .split(',').map(s=>s.trim()).filter(Boolean);
+  const btn=document.getElementById('labCreateSubmit'); btn.disabled=true; btn.textContent='creating…';
   try{
     const r=await (await fetch('/api/lab/hypotheses',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({statement:stmt, category_filter:cat, feature_set:features,
         prompt_version:'signal-v1', model_version:'claude-sonnet-4',
         lineage:{source:'manual:web', parents:[]}})})).json();
     if(r.error){ alert(r.error.message || r.error); return; }
-    labSelId=r.id; loadLabHypos();
+    labSelId=r.id;
+    document.getElementById('labNewStatement').value='';
+    hideLabCreate();
+    loadLabHypos();
   }catch(e){ alert(e); }
+  finally{ btn.disabled=false; btn.textContent='Create hypothesis'; }
 }
 function defaultLabWindow(){
   const end=new Date();
@@ -1323,7 +1353,11 @@ async function runHistBacktest(){
 }
 function renderBtResult(r){
   const s=r.summary;
-  if(!s||!s.n){ document.getElementById('btResult').innerHTML='<div class="hist">该 slice 暂无足够已结算市场(n=0)。换 category 或放宽 horizon/max。</div>'; return; }
+  if(!s||!s.n){
+    document.getElementById('btResult').innerHTML=
+      '<div class="hist">该 slice 暂无足够本地已结算价格历史(n=0)。这是 Historical replay，不是上方 Evidence backtest；可换 slice/提高 max markets，或先用 Evidence backtest 生成 SQLite report。</div>';
+    return;
+  }
   const verdict=s.beats_market?'<span class="v-pos">✅ BEATS MARKET</span>':'<span class="v-neg">❌ NO EDGE</span>';
   document.getElementById('btResult').innerHTML=
     `<div style="font-size:13px;margin-bottom:8px">${verdict} · signal=<b>${esc(r.signal)}</b> · slice=<b>${esc(r.category||'all')}</b> · n=${s.n}${s.sample_adequate?'':' <span class="mut">(样本不足)</span>'}</div>`+
