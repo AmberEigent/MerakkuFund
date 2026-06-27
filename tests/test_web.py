@@ -57,5 +57,19 @@ def test_server_app_has_routes():
 
     paths = {r.path for r in app.routes}
     for p in ("/", "/api/chat", "/api/skills", "/api/mcp", "/api/portfolio",
-              "/api/markets", "/api/backtest"):
+              "/api/markets", "/api/backtest", "/api/lab/hypotheses",
+              "/api/lab/hypotheses/{id}", "/api/lab/hypotheses/{id}/backtests",
+              "/api/lab/reports/{id}"):
         assert p in paths
+
+
+def test_lab_ui_uses_lab_api_contract():
+    from pathlib import Path
+
+    html = Path("polyagents/web/static/index.html").read_text()
+
+    assert "fetch('/api/lab/hypotheses')" in html
+    assert "'/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests'" in html
+    assert "'/api/lab/reports/'+encodeURIComponent(r.report_id)" in html
+    assert "function renderLabReport" in html
+    assert "function runAlphaTest" not in html
