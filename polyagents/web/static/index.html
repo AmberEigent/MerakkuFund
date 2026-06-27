@@ -1123,13 +1123,23 @@ async function loadEval(){
   }catch(e){ el.textContent = '⚠ '+e; }
 }
 
-// ---- Lab: hypothesis-centric sandbox (real objects) ----
-let labHypos = [], labSelId = null;
+// ---- Lab: hypothesis-centric sandbox (Lab API + SQLite evidence) ----
+let labHypos = [], labSelId = null, labDetails = {}, labReports = {};
 function labBadge(s){ return `<span class="ob-badge ${s}">${esc(s)}</span>`; }
+function labMetric(m, key, fallback='—'){
+  const v=m && m[key];
+  return (typeof v === 'number') ? v.toFixed(3) : (v ?? fallback);
+}
+function labLatestReport(id){
+  const detail = labDetails[id] || {};
+  const reports = detail.reports || [];
+  return reports.length ? reports[0] : null;
+}
 async function loadLabHypos(){
   try{
-    const r = await (await fetch('/api/objects?type=hypothesis')).json();
-    labHypos = (r.objects||[]).filter(o => o.type==='hypothesis');
+    const r = await (await fetch('/api/lab/hypotheses')).json();
+    if(r.error) throw new Error(r.error.message || r.error);
+    labHypos = r.items || [];
     renderLabList(); renderLabTable(); renderLabMetrics();
     if(labHypos.length){ selectLabHypo((labHypos.find(h=>h.id===labSelId)||labHypos[0]).id); }
     else {
@@ -1142,25 +1152,36 @@ async function loadLabHypos(){
 function renderLabList(){
   const el=document.getElementById('convList'); if(!el || curView!=='lab') return;
   const q=(document.getElementById('convSearch').value||'').toLowerCase();
-  const items=labHypos.filter(h=>(h.title||'').toLowerCase().includes(q));
+  const items=labHypos.filter(h=>((h.statement||h.id||'').toLowerCase().includes(q)));
   el.innerHTML='<div class="hgroup">Hypotheses</div>'+(items.length?items.map(h=>{
-    const cat=(h.payload&&h.payload.category_filter)?' · '+esc(h.payload.category_filter):'';
+    const cat=h.category_filter?' · '+esc(h.category_filter):'';
     return `<button class="conv ${h.id===labSelId?'active':''}" onclick="selectLabHypo('${h.id}')">
-      <div class="ctop"><b>${esc((h.title||h.id).slice(0,42))}</b><span class="cm">${esc(h.state)}</span></div>
+      <div class="ctop"><b>${esc((h.statement||h.id).slice(0,42))}</b><span class="cm">${esc(h.state)}</span></div>
       <div class="cd">${esc(h.id)} · v${h.version}${cat}</div></button>`;
   }).join(''):'<div class="hist">No hypotheses yet.</div>');
 }
-function selectLabHypo(id){
+async function selectLabHypo(id){
   labSelId=id; const h=labHypos.find(x=>x.id===id); if(!h) return;
   renderLabList(); renderLabTable();
   document.getElementById('labSelId').textContent=h.id;
   document.getElementById('labSelState').innerHTML=labBadge(h.state);
-  const cat=(h.payload&&h.payload.category_filter)?h.payload.category_filter:'all';
+  const cat=h.category_filter||'all';
   const bs=document.getElementById('btSlice'); if(bs) bs.textContent='· slice: '+cat;
   renderLabGates(h); renderLabDetail(h); renderLabLineage(h);
+  try{
+    const r=await (await fetch('/api/lab/hypotheses/'+encodeURIComponent(id))).json();
+    if(r.error) throw new Error(r.error.message || r.error);
+    labDetails[id]=r;
+    renderLabMetrics(); renderLabTable();
+    renderLabGates(r.hypothesis || h); renderLabDetail(r.hypothesis || h); renderLabLineage(r.hypothesis || h);
+  }catch(e){
+    document.getElementById('labSelBody').insertAdjacentHTML('beforeend','<div class="st-err">⚠ '+esc(e.message||e)+'</div>');
+  }
 }
 function renderLabGates(h){
-  const g=h.gates||{};
+  const rep=labLatestReport(h.id);
+  const gates=(rep && rep.gates) || {};
+  const g={g1:true, g2:!!gates.paper_ready, g3:h.state==='live'};
   const box=(step,ttl,rule,cls)=>`<div class="gbox ${cls}"><div class="gstep">${step}</div><div class="gttl">${ttl}</div><div class="grule">${rule}</div></div>`;
   document.getElementById('labGates').innerHTML=
     box('gate 1 · Ask → Hypothesis','用户显式点击','人工门 · 草稿进 Lab', g.g1?'pass':'cur')+
@@ -1170,88 +1191,125 @@ function renderLabGates(h){
     box('gate 3 · paper → Live','风控门 + 人工','<span class="mono">apy &gt; min · max_dd &lt; lim · manual</span>', g.g3?'pass':'lock');
 }
 function renderLabDetail(h){
-  const p=h.payload||{}, es=h.eval_summary;
-  const feats=(p.feature_set&&p.feature_set.length)?p.feature_set.join(', '):'—';
-  let verdict = '<span class="mut">未跑 alpha 测试。点 ▶ Run alpha test 评分 vs 市场 baseline。</span>';
-  const bt = es && es.n>0
-    ? `$ alpha_test --hypothesis ${h.id} --slice ${p.category_filter||'all'} --baseline market\n`+
-      `settled: ${es.n}\nbrier_model: ${es.brier_model.toFixed(3)} · brier_market: ${es.brier_market.toFixed(3)}\n`+
-      `brier_delta: ${es.brier_delta.toFixed(3)} · bootstrap 95% CI [${es.brier_delta_ci[0].toFixed(3)}, ${es.brier_delta_ci[1].toFixed(3)}]\n`+
-      `ece: ${es.ece.toFixed(3)} · n≥30: ${es.sample_adequate}\n`+
-      `verdict: ${es.beats_market ? 'BEATS_MARKET (CI 全在 0 以下)' : 'NO EDGE (CI 含 0 或更差)'}`
-    : (es && es.n===0
-        ? `alpha_test: 该 slice (${p.category_filter||'all'}) 下暂无已结算预测。\n先在 Ask/Strategy 里分析市场、待其结算后再测。`
-        : '尚无 alpha 测试结果。');
-  if(es && es.n>0){
-    verdict = es.beats_market
-      ? `<span class="v-pos">✅ BEATS MARKET</span> · brier Δ ${es.brier_delta.toFixed(3)} CI [${es.brier_delta_ci[0].toFixed(3)},${es.brier_delta_ci[1].toFixed(3)}] · n=${es.n}`
-      : `<span class="v-neg">❌ NO EDGE</span> · brier Δ ${es.brier_delta.toFixed(3)} CI [${es.brier_delta_ci[0].toFixed(3)},${es.brier_delta_ci[1].toFixed(3)}] · n=${es.n}${es.sample_adequate?'':' (样本不足)'}`;
-  } else if(es && es.n===0){ verdict = '<span class="mut">该 slice 暂无已结算预测 — 样本不足。</span>'; }
-  const proms=(h.next_states||[]).map(s=>`<button class="${s==='archived'?'arch':''}" onclick="promoteLabHypo('${h.id}','${s}')">promote → ${s}</button>`).join('');
+  const rep=labLatestReport(h.id);
+  const m=(rep && rep.metrics) || h.eval_summary || null;
+  const feats=(h.feature_set&&h.feature_set.length)?h.feature_set.join(', '):'—';
+  const verdict=m && m.n>0
+    ? ((m.brier_delta<0)?`<span class="v-pos">BEATS MARKET</span> · Δ ${m.brier_delta.toFixed(3)} · n=${m.n}`
+      : `<span class="v-neg">NO EDGE</span> · Δ ${m.brier_delta.toFixed(3)} · n=${m.n}`)
+    : '<span class="mut">尚无 evidence backtest report。</span>';
+  const bt = rep
+    ? `$ lab_report ${rep.id}\n`+
+      `time_window: ${(rep.time_window&&rep.time_window.start)||'—'} → ${(rep.time_window&&rep.time_window.end)||'—'}\n`+
+      `n: ${labMetric(m,'n')} · brier_model: ${labMetric(m,'brier_model')} · brier_market: ${labMetric(m,'brier_market')}\n`+
+      `brier_delta: ${labMetric(m,'brier_delta')} · ece: ${labMetric(m,'ece')}\n`+
+      `paper_ready: ${rep.gates&&rep.gates.paper_ready ? 'true' : 'false'} · pit_warnings: ${(rep.pit_warnings||[]).length}`
+    : '尚无 EvaluationReport。';
+  const reportBtns=((labDetails[h.id]&&labDetails[h.id].reports)||[]).slice(0,3).map(r=>
+    `<button onclick="openLabReport('${r.id}')">report · ${esc(r.id)}</button>`).join('');
   document.getElementById('labSelBody').innerHTML=
-    `<p style="margin:0 0 12px;color:var(--ink)">"${esc(p.statement||h.title||'')}"</p>
+    `<p style="margin:0 0 12px;color:var(--text)">"${esc(h.statement||'')}"</p>
      <dl class="lab-kv">
        <dt>version</dt><dd>${h.version}</dd>
        <dt>snapshot_id</dt><dd>${esc(h.snapshot_id)}</dd>
-       <dt>slice</dt><dd>${esc(p.category_filter||'all')}</dd>
+       <dt>slice</dt><dd>${esc(h.category_filter||'all')}</dd>
        <dt>feature_set</dt><dd>${esc(feats)}</dd>
-       <dt>model_version</dt><dd>${esc(p.model_version||'—')}</dd>
+       <dt>model_version</dt><dd>${esc(h.model_version||'—')}</dd>
      </dl>
-     <div class="panel-h" style="font-size:13px"><span>Alpha test · 是否跑赢市场</span>
-       <button class="send" style="height:30px;padding:0 12px" id="alphaBtn" onclick="runAlphaTest('${h.id}')">▶ Run alpha test</button></div>
+     <div class="panel-h" style="font-size:13px"><span>Evidence backtest · SQLite report</span>
+       <button class="send" style="height:30px;padding:0 12px" id="alphaBtn" onclick="runLabBacktest('${h.id}')">▶ Run evidence backtest</button></div>
      <div style="margin:0 0 10px;font-size:13px">${verdict}</div>
      <pre class="evalbox">${esc(bt)}</pre>
-     <div class="ob-promote" style="margin-top:12px">${proms}</div>`;
+     <div class="ob-promote" style="margin-top:12px">${reportBtns || '<span class="hist">report 会在 backtest 完成后出现在这里。</span>'}</div>`;
 }
 function renderLabLineage(h){
   const ev=(h.lineage&&h.lineage.events)||[];
   document.getElementById('labLineage').innerHTML = ev.length
     ? `<div class="ob-line">${ev.map(e=>`<div class="ob-ev"><b>${esc(e.from_state)} → ${esc(e.to_state)}</b><span> · ${esc(e.promoted_by)}</span></div>`).join('')}</div>`
-    : '<div class="hist">尚无晋升记录(still draft)。</div>';
+    : `<div class="hist">source: ${esc((h.lineage&&h.lineage.source)||'manual')} · parents: ${esc(((h.lineage&&h.lineage.parents)||[]).join(', ')||'—')}</div>`;
 }
 function renderLabTable(){
   const b=document.getElementById('labHypoBody');
   document.getElementById('labHypoCount').textContent=labHypos.length+' total';
   if(!labHypos.length){ b.innerHTML='<tr><td colspan="8" class="hist">No hypotheses — create one.</td></tr>'; return; }
   b.innerHTML=labHypos.map(h=>{
-    const p=h.payload||{}, es=h.eval_summary;
-    const next=h.state==='draft'?'promote to lab':(h.state==='lab'?'accumulate n / eval':(h.state==='paper'?'forward-test':'—'));
+    const rep=labLatestReport(h.id), es=(rep&&rep.metrics)||h.eval_summary;
+    const next=rep?'review report':'run backtest';
     return `<tr onclick="selectLabHypo('${h.id}')" class="${h.id===labSelId?'active':''}">
-      <td class="mono">${esc(h.id)}</td><td>${esc((h.title||'').slice(0,46))}</td>
-      <td>${esc(p.category_filter||'—')}</td><td>${labBadge(h.state)}</td>
+      <td class="mono">${esc(h.id)}</td><td>${esc((h.statement||'').slice(0,46))}</td>
+      <td>${esc(h.category_filter||'—')}</td><td>${labBadge(h.state)}</td>
       <td class="mono">${es?es.brier_delta.toFixed(3):'—'}</td><td class="mono">${es?es.ece.toFixed(3):'—'}</td>
       <td class="mono">${es?es.n:'—'}</td><td>${next}</td></tr>`;
   }).join('');
 }
 function renderLabMetrics(){
   const bs=s=>labHypos.filter(h=>h.state===s).length;
+  const reportCount=Object.values(labDetails).reduce((n,d)=>n+((d.reports||[]).length),0);
   const cards=[['active hypotheses',labHypos.length,bs('lab')+' lab · '+bs('paper')+' paper'],
     ['drafts',bs('draft'),'awaiting gate 1'],['archived',bs('archived'),'killed / decayed'],
-    ['evaluation','—','需 #2 评估账本']];
+    ['reports',reportCount,'SQLite evaluation reports']];
   document.getElementById('labMetrics').innerHTML=cards.map(c=>
     `<div class="card"><div class="k">${c[0]}</div><div class="v">${c[1]}</div><div class="hist" style="padding:0;margin-top:3px">${c[2]}</div></div>`).join('');
 }
 async function newLabHypothesis(){
   const stmt=prompt('Hypothesis statement (假设陈述):'); if(!stmt) return;
-  const cat=prompt('Category (crypto / politics / …, 可空):')||'';
+  const cat=prompt('Category filter (crypto / politics / …):')||'crypto';
+  const features=(prompt('Feature set, comma separated:', 'news_sentiment,similar_markets')||'')
+    .split(',').map(s=>s.trim()).filter(Boolean);
   try{
-    const r=await (await fetch('/api/objects',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({statement:stmt, category:cat})})).json();
-    if(r.error){ alert(r.error); return; }
+    const r=await (await fetch('/api/lab/hypotheses',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({statement:stmt, category_filter:cat, feature_set:features,
+        prompt_version:'signal-v1', model_version:'claude-sonnet-4',
+        lineage:{source:'manual:web', parents:[]}})})).json();
+    if(r.error){ alert(r.error.message || r.error); return; }
     labSelId=r.id; loadLabHypos();
   }catch(e){ alert(e); }
 }
-async function promoteLabHypo(id,to){
+function defaultLabWindow(){
+  const end=new Date();
+  const start=new Date(end.getTime()-90*24*3600*1000);
+  return {start:start.toISOString().replace(/\.\d{3}Z$/,'Z'), end:end.toISOString().replace(/\.\d{3}Z$/,'Z')};
+}
+async function runLabBacktest(id){
+  const h=labHypos.find(x=>x.id===id);
+  const btn=document.getElementById('alphaBtn'); if(btn){ btn.disabled=true; btn.textContent='running…'; }
+  document.getElementById('btResult').innerHTML='<div class="hist">正在生成 Forecasts → EvaluationReport → SQLite...</div>';
   try{
-    const r=await (await fetch('/api/objects/promote',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({id, to_state:to, by:'user:web', evidence:'manual gate (lab)'})})).json();
-    if(r.error){ alert(r.error); return; }
-    labSelId=id; loadLabHypos();
+    const body={time_window:defaultLabWindow(), market_filter:{category:(h&&h.category_filter)||'crypto', settled_only:true},
+      model_version:(h&&h.model_version)||'claude-sonnet-4', prompt_version:(h&&h.prompt_version)||'signal-v1',
+      calibrator_id:'shrink-to-market-v1', pit_strict:true, max_markets:100};
+    const r=await (await fetch('/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)})).json();
+    if(r.error){ throw new Error(r.error.message || r.error); }
+    const report=await (await fetch('/api/lab/reports/'+encodeURIComponent(r.report_id))).json();
+    if(report.error){ throw new Error(report.error.message || report.error); }
+    labReports[report.id]=report;
+    await selectLabHypo(id);
+    renderLabReport(report);
   }catch(e){ alert(e); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='▶ Run evidence backtest'; } }
+}
+async function openLabReport(id){
+  try{
+    const report=labReports[id] || await (await fetch('/api/lab/reports/'+encodeURIComponent(id))).json();
+    if(report.error){ throw new Error(report.error.message || report.error); }
+    labReports[id]=report; renderLabReport(report);
+  }catch(e){ alert(e); }
+}
+function renderLabReport(rep){
+  const m=rep.metrics||{};
+  const sample=(rep.market_sample||[]).slice(0,5).map(x=>
+    `${x.market_token_id}: p_cal=${Number(x.p_cal).toFixed(3)} market=${Number(x.p_market).toFixed(3)} outcome=${x.outcome}`).join('\n');
+  document.getElementById('btResult').innerHTML=
+    `<div style="font-size:13px;margin-bottom:8px"><b>${esc(rep.id)}</b> · hypothesis=${esc(rep.hypothesis_id)} · ${rep.gates&&rep.gates.paper_ready?'<span class="v-pos">paper ready</span>':'<span class="v-neg">not ready</span>'}</div>`+
+    `<pre class="evalbox">window: ${(rep.time_window&&rep.time_window.start)||'—'} → ${(rep.time_window&&rep.time_window.end)||'—'}\n`+
+    `n: ${m.n} · brier_model: ${Number(m.brier_model||0).toFixed(3)} · brier_market: ${Number(m.brier_market||0).toFixed(3)}\n`+
+    `brier_delta: ${Number(m.brier_delta||0).toFixed(3)} · ece: ${Number(m.ece||0).toFixed(3)} · sample_adequate: ${m.sample_adequate}\n`+
+    `market_sample:\n${esc(sample || '—')}</pre>`;
 }
 async function runHistBacktest(){
   const h=labHypos.find(x=>x.id===labSelId);
-  const cat=(h&&h.payload)?(h.payload.category_filter||''):'';
+  const cat=(h&&h.category_filter)||'';
   const btn=document.getElementById('btRun'); btn.disabled=true; btn.textContent='running…';
   document.getElementById('btResult').innerHTML='<div class="hist">回放已结算市场中…(逐个取价格历史,可能 10–30s)</div>';
   try{
@@ -1274,16 +1332,6 @@ function renderBtResult(r){
     `ece: ${s.ece.toFixed(3)} · predict@ ${(r.predict_frac*100).toFixed(0)}% · markets replayed: ${r.n_markets}\n`+
     `PIT: 价格历史切到 prediction_time 之前(已断言无未来泄漏)</pre>`;
 }
-async function runAlphaTest(id){
-  const btn=document.getElementById('alphaBtn'); if(btn){ btn.disabled=true; btn.textContent='testing…'; }
-  try{
-    const r=await (await fetch('/api/objects/alpha_test',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({id})})).json();
-    if(r.error){ alert(r.error); }
-    labSelId=id; await loadLabHypos();        // eval_summary now attached → panel + gate2 update
-  }catch(e){ alert(e); }
-}
-
 // ---- objects (5 financial objects + 3-gate state machine, real data) ----
 let objList = [];
 let objActive = null;

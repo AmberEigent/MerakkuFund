@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS evaluations (
     scope TEXT NOT NULL,
     hypothesis_id TEXT NOT NULL,
     backtest_run_id TEXT,
+    report_json TEXT,
     metrics_json TEXT NOT NULL,
     gates_json TEXT NOT NULL,
     baseline_delta REAL NOT NULL,
@@ -89,10 +90,19 @@ class LabRepository:
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
+        self._ensure_migrations()
         self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
+
+    def _ensure_migrations(self) -> None:
+        columns = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(evaluations)").fetchall()
+        }
+        if "report_json" not in columns:
+            self.conn.execute("ALTER TABLE evaluations ADD COLUMN report_json TEXT")
 
     def save_hypothesis(self, hypothesis: HypothesisRecord) -> None:
         payload = asdict(hypothesis)
@@ -176,15 +186,16 @@ class LabRepository:
         self.conn.execute(
             """
             INSERT OR REPLACE INTO evaluations
-            (id, scope, hypothesis_id, backtest_run_id, metrics_json, gates_json,
+            (id, scope, hypothesis_id, backtest_run_id, report_json, metrics_json, gates_json,
              baseline_delta, n_samples, generated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 report["id"],
                 report["scope"],
                 report["hypothesis_id"],
                 report.get("backtest_run_id"),
+                json.dumps(report, ensure_ascii=False),
                 json.dumps(metrics, ensure_ascii=False),
                 json.dumps(gates, ensure_ascii=False),
                 float(metrics.get("brier_delta", 0.0)),
@@ -198,6 +209,8 @@ class LabRepository:
         row = self.conn.execute("SELECT * FROM evaluations WHERE id=?", (report_id,)).fetchone()
         if row is None:
             return None
+        if row["report_json"]:
+            return json.loads(row["report_json"])
         return {
             "id": row["id"],
             "type": "evaluation_report",

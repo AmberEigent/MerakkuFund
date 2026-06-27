@@ -54,7 +54,11 @@ def test_backtest_runner_persists_evidence(tmp_path):
     assert counts["evaluations"] == 1
     assert counts["backtest_runs"] == 1
     assert repo.get_backtest_run(result.id).report_id == result.report_id
-    assert repo.get_report(result.report_id)["metrics"]["n"] == result.forecast_count
+    report = repo.get_report(result.report_id)
+    assert report["metrics"]["n"] == result.forecast_count
+    assert report["time_window"]["start"] == "2026-03-01T00:00:00Z"
+    assert len(report["market_sample"]) == result.forecast_count
+    assert report["pit_warnings"] == []
     repo.close()
 
 
@@ -105,6 +109,11 @@ def test_backtest_runner_uses_stored_collections(tmp_path):
     assert result.forecast_count == 2
     assert {f["market_token_id"] for f in forecasts} == {"token_yes_crypto_1", "token_yes_crypto_2"}
     assert forecasts[0]["p_cal"] != forecasts[0]["p_market"]
-    assert repo.get_report(result.report_id)["metrics"]["n"] == 2
+    report = repo.get_report(result.report_id)
+    assert report["metrics"]["n"] == 2
+    assert {m["market_token_id"] for m in report["market_sample"]} == {
+        "token_yes_crypto_1",
+        "token_yes_crypto_2",
+    }
     store.close()
     repo.close()
