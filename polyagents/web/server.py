@@ -23,12 +23,17 @@ import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from dataclasses import asdict
+
 from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from polyagents import mcp_server
 from polyagents.default_config import DEFAULT_CONFIG
+from polyagents.lab.backtest import BacktestRunner, get_backtest_run, get_report
+from polyagents.lab.schemas import BacktestRequest, CreateHypothesisRequest
+from polyagents.lab.service import create_hypothesis, default_repository, get_hypothesis, list_hypotheses
 
 from polyagents.runtime.session import AgentSession
 
@@ -41,6 +46,13 @@ _STATIC = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(title="polyagents chat")
 app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
+
+
+def _qlib_python() -> str:
+    configured = DEFAULT_CONFIG.get("qlib_python")
+    if configured and Path(str(configured)).exists():
+        return str(configured)
+    return sys.executable
 
 
 @app.get("/")
@@ -109,7 +121,7 @@ async def backtest(forward_bars: int = 5) -> JSONResponse:
     """Run the qlib backtest in the qlib venv (cross-venv) and return metrics +
     an equity curve for the Backtest tab. Factor→model→backtest over the SQLite
     candle history, leakage-safe time split."""
-    py = DEFAULT_CONFIG.get("qlib_python") or sys.executable
+    py = _qlib_python()
     snippet = (
         "import json;from polyagents.mcp_servers.qlib_backtest import run_backtest,data_summary;"
         f"print('@@'+json.dumps({{'summary':data_summary(),'backtest':run_backtest(forward_bars={int(forward_bars)})}}))"
@@ -128,6 +140,74 @@ async def backtest(forward_bars: int = 5) -> JSONResponse:
         return JSONResponse({"error": f"qlib python not found: {py}"})
     except Exception as exc:
         return JSONResponse({"error": str(exc)})
+
+
+@app.get("/api/lab/hypotheses")
+async def lab_hypotheses() -> JSONResponse:
+    return JSONResponse({"items": list_hypotheses(), "next_cursor": None})
+
+
+@app.post("/api/lab/hypotheses")
+async def lab_create_hypothesis(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        response = create_hypothesis(CreateHypothesisRequest(**payload))
+        return JSONResponse(asdict(response))
+    except Exception as exc:
+        return JSONResponse({"error": {"code": "validation_error", "message": str(exc)}}, status_code=400)
+
+
+@app.get("/api/lab/hypotheses/{id}")
+async def lab_hypothesis_detail(id: str) -> JSONResponse:
+    hypothesis = get_hypothesis(id)
+    if hypothesis is None:
+        return JSONResponse({"error": {"code": "not_found", "message": f"hypothesis not found: {id}"}}, status_code=404)
+    return JSONResponse({
+        "hypothesis": asdict(hypothesis),
+        "reports": default_repository().reports_for_hypothesis(id),
+        "audit_tail": [],
+    })
+
+
+@app.post("/api/lab/hypotheses/{id}/backtests")
+async def lab_run_backtest(id: str, request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        body = {**payload, "hypothesis_id": id}
+        result = BacktestRunner().run(BacktestRequest(**body))
+        return JSONResponse({
+            "backtest_run_id": result.id,
+            "status": result.status,
+            "report_id": result.report_id,
+        })
+    except Exception as exc:
+        return JSONResponse({"error": {"code": "evaluation_failed", "message": str(exc)}}, status_code=400)
+
+
+@app.get("/api/lab/backtests/{id}")
+async def lab_backtest_status(id: str) -> JSONResponse:
+    result = get_backtest_run(id)
+    if result is None:
+        return JSONResponse({"error": {"code": "not_found", "message": f"backtest not found: {id}"}}, status_code=404)
+    return JSONResponse(asdict(result))
+
+
+@app.get("/api/lab/reports/{id}")
+async def lab_report(id: str) -> JSONResponse:
+    report = get_report(id)
+    if report is None:
+        return JSONResponse({"error": {"code": "not_found", "message": f"report not found: {id}"}}, status_code=404)
+    return JSONResponse(report)
+
+
+@app.get("/api/lab/system/status")
+async def lab_system_status() -> JSONResponse:
+    return JSONResponse({
+        "tool_manifest_hash": "tm_lab_v1",
+        "permission_policy": "lab-v1",
+        "data_sources": [{"id": "polymarket", "status": "unknown", "last_checked_at": None}],
+        "live_tools_enabled": False,
+    })
 
 
 def _sse(payload: dict) -> str:
@@ -166,6 +246,15 @@ async def _strategy_stream(token_id: str, strategy: str, use_llm: bool) -> Async
                 emit({"type": "error", "message": f"no market for token_id={token_id!r}"})
                 return
             emit({"type": "market", "question": market.question, "token_id": market.token_id})
+            if strategy != "research" and not os.getenv("ANTHROPIC_API_KEY"):
+                emit({
+                    "type": "error",
+                    "message": (
+                        "Strategy signal/full/trade runs need ANTHROPIC_API_KEY. "
+                        "Use Strategy=research for data-only local demos, or add ANTHROPIC_API_KEY to .env."
+                    ),
+                })
+                return
             router = LLMRouter(eng._get_llm()) if use_llm else None
             bb = run_strategy(market, graph=eng, config=eng.config, strategy=strategy,
                               router=router, on_event=emit)

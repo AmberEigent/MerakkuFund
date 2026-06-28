@@ -106,11 +106,26 @@ def run_backtest(forward_bars: int = 5, train_frac: float = 0.7) -> dict:
         proba = model.predict_proba(Xte)[:, 1]
         engine = "lightgbm"
     except Exception:
-        from sklearn.linear_model import LogisticRegression
+        try:
+            from sklearn.linear_model import LogisticRegression
 
-        model = LogisticRegression(max_iter=500).fit(Xtr, ytr)
-        proba = model.predict_proba(Xte)[:, 1]
-        engine = "logistic"
+            model = LogisticRegression(max_iter=500).fit(Xtr, ytr)
+            proba = model.predict_proba(Xte)[:, 1]
+            engine = "logistic"
+        except Exception:
+            # Last-resort deterministic model for local demos without the qlib
+            # ML venv. It keeps the backtest path usable and leakage-safe.
+            import numpy as np
+
+            score = (
+                0.45 * Xte["mom10"].to_numpy()
+                + 0.35 * Xte["ret5"].to_numpy()
+                + 0.20 * Xte["ret1"].to_numpy()
+            )
+            scale = float(np.nanstd(score)) or 1.0
+            proba = 1.0 / (1.0 + np.exp(-(score / scale)))
+            proba = np.clip(proba, 0.01, 0.99)
+            engine = "momentum-fallback"
 
     pred = (proba > 0.5).astype(int)
     acc = float((pred == yte).mean())

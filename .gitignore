@@ -15,6 +15,7 @@ env/
 
 # Local runtime / deployment scratch
 .local/
+.polyagents/
 *.log
 *.tar
 *.tgz
