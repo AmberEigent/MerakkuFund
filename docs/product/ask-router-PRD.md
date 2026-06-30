@@ -43,8 +43,23 @@ Ask 问题发散度高,**一个 ReAct 图通吃不合适**:确定性领域问题
 
 composer 加**模式胶囊**:`Auto`(默认,自动分类)/`Domain`/`General`。气泡上小标 `· routed: general`(透明可审计)。
 
-## 七、范围外 / 分期
-- **P2**:General 后端换 pi.dev coding agent(MCP 集成,单独 PR)。
+## 七、General 后端可插拔(P2 已实现)
+
+General 模式后端**可切换**(`web/general_backend.py`):
+- `claude`(默认):Claude + web_search(P1)。
+- `devbox`:委托 **Alpha DevBox / pi.dev** coding agent —— 它跑自己的 agent loop(编码/工具/沙盒),返回 AI SDK SSE,我们**中继**成 token 事件。
+
+**激活(需 Alpha DevBox 在跑)**:
+```bash
+ASK_GENERAL_BACKEND=devbox
+DEVBOX_BASE_URL=http://localhost:18092   # Alpha DevBox web 端口
+DEVBOX_USER_ID=web                        # 可选
+```
+- 契约:`POST /api/devbox/chat`,体 `{id, messages:[{id,role:'user',parts:[{type:'text',text}]}]}`,头 `X-User-Id`;响应 AI SDK SSE(`text-delta`)。
+- **不可达/未配 → 自动降级回 Claude**,不影响使用。审计落 `general.backend=devbox`。
+- 测试用 mock SSE,不需 devbox 在跑;**上线前在真 Alpha DevBox 上 smoke 一轮**(校准 SSE 字段)。
+
+## 八、范围外 / 后续
 - Skill 独立 Handler;web_search 结果引用渲染;分类结果缓存。
 
 ## 八、验收

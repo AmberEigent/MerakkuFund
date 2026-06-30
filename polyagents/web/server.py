@@ -38,6 +38,7 @@ from polyagents.lab.service import create_hypothesis, default_repository, get_hy
 from polyagents.runtime.session import AgentSession
 
 from .agent import build_agent, build_general_agent, list_mcp_servers, list_skills
+from .general_backend import chosen_general_backend, stream_devbox_general
 from .router import classify
 from .uploads import UploadCache, build_message_content, extract, public_view
 
@@ -531,6 +532,19 @@ async def _stream(history: list[dict], skills: list[str], model: str | None = No
                 attachments=len(attachments or []))
     session.log("route.decided", route=route, by=by)
     yield _sse({"type": "route", "route": route, "by": by})
+    # General mode may delegate to an external coding agent (Alpha DevBox / pi);
+    # it streams its own SSE which we relay. Falls back to Claude when unconfigured.
+    if route == "general" and chosen_general_backend() == "devbox":
+        session.log("general.backend", backend="devbox")
+        try:
+            async for ev in stream_devbox_general(last_text):
+                yield _sse(ev)
+            session.log("session.end")
+            yield _sse({"type": "done"})
+        except Exception as exc:
+            session.log("session.error", message=str(exc))
+            yield _sse({"type": "error", "message": str(exc)})
+        return
     try:
         if route == "general":
             agent = build_general_agent(model=model)
