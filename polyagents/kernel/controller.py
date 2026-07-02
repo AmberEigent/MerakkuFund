@@ -39,6 +39,8 @@ class KernelResult:
     facts: dict = field(default_factory=dict)
     trace: list = field(default_factory=list)   # Step per capability call
     steps: int = 0
+    notes: list = field(default_factory=list)   # the step-by-step scratchpad
+    llm_ok: bool = True                          # did the LLM ever make a usable decision?
 
 
 def _text_of(resp: Any) -> str:
@@ -118,6 +120,7 @@ class KernelController:
     def run(self, request: str, **facts) -> KernelResult:
         ctx = Context(Goal(frozenset(), {"question": request, **facts}, "kernel"))
         notes: list[str] = []
+        decided = 0                                       # usable LLM decisions seen
         self._emit({"type": "loop.start", "goal": [], "label": "kernel"})
         self._audit("loop.start", label="kernel", request=_short(request))
         for i in range(self.max_steps):
@@ -127,13 +130,14 @@ class KernelController:
             if action == "final" or (action != "call" and not runnable):
                 answer = str(decision.get("answer", "")).strip()
                 if answer:
-                    return self._finish(ctx, answer, i)
+                    return self._finish(ctx, answer, i, notes, llm_ok=True)
             if action == "call":
                 name = str(decision.get("capability", "")).strip()
                 cap = next((c for c in runnable if c.name == name), None)
                 if cap is None:
                     notes.append(f"- tried to call '{name}' but it is not available now")
                     continue
+                decided += 1
                 self._emit({"type": "capability.start", "name": cap.name})
                 try:
                     if cap.stream is not None and self.on_event is not None:
@@ -155,22 +159,27 @@ class KernelController:
                 continue
             # neither a valid call nor a final answer -> nudge once more, then bail
             notes.append("- (no decision; must call a capability or give final answer)")
-        return self._finish(ctx, self._forced_answer(ctx, request), self.max_steps)
+        forced, forced_ok = self._forced_answer(ctx, request)
+        return self._finish(ctx, forced, self.max_steps, notes,
+                            llm_ok=bool(decided) or forced_ok)
 
-    def _forced_answer(self, ctx: Context, request: str) -> str:
-        """Budget exhausted — make the model answer from whatever we gathered."""
+    def _forced_answer(self, ctx: Context, request: str) -> tuple[str, bool]:
+        """Budget exhausted — make the model answer from whatever we gathered.
+        Returns ``(answer, ok)`` where ok is False if the LLM was unusable."""
         facts = "\n".join(f"- {k}: {_short(v)}" for k, v in ctx.facts.items() if k != "question")
         user = (f"User request: {request}\n\nFacts gathered:\n{facts or '- (none)'}\n\n"
                 "Give the final answer to the user now (plain text).")
         try:
-            return _text_of(self.llm.invoke([("system", _SYS), ("user", user)])).strip() \
-                or "(no answer)"
+            text = _text_of(self.llm.invoke([("system", _SYS), ("user", user)])).strip()
+            return (text, True) if text else ("(no answer)", False)
         except Exception:
-            return "(no answer)"
+            return "(no answer)", False
 
-    def _finish(self, ctx: Context, answer: str, steps: int) -> KernelResult:
+    def _finish(self, ctx: Context, answer: str, steps: int, notes: list,
+                *, llm_ok: bool) -> KernelResult:
         ctx.facts["answer"] = answer
         self._audit("loop.end", steps=steps, path=[s.capability for s in ctx.trace])
         self._emit({"type": "loop.end", "done": True,
                     "path": [s.capability for s in ctx.trace]})
-        return KernelResult(answer=answer, facts=ctx.facts, trace=ctx.trace, steps=steps)
+        return KernelResult(answer=answer, facts=ctx.facts, trace=ctx.trace, steps=steps,
+                            notes=notes, llm_ok=llm_ok)

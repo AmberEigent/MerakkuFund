@@ -57,11 +57,14 @@ def run_mode(mode: str, *, request: str | None = None, registry: list | None = N
     if mode == "kernel":
         controller_llm = llm if llm is not None else _default_controller_llm()
         if controller_llm is not None:
-            facts.setdefault("event", request)     # so data_agent is selectable by the LLM
+            ctrl_facts = {"event": request, **facts}   # so data_agent is selectable by the LLM
             ctrl = KernelController(reg, controller_llm, max_steps=max_steps,
                                     on_event=on_event, audit=audit)
-            return _as_context(ctrl.run(request or "", **facts))
-        # no LLM → deterministic fallback below (offline-runnable)
+            result = ctrl.run(request or "", **ctrl_facts)
+            if result.llm_ok:                          # controller drove it → done
+                return _as_context(result)
+            # LLM unusable (disabled/offline) → deterministic fallback below
+        # no LLM → deterministic fallback (offline-runnable)
     goal = _goal_for(mode, request, facts)
     loop = AgentLoop(reg, max_steps=max_steps, fallback_planner=fallback_planner,
                      audit=audit, on_event=on_event)
