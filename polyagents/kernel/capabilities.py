@@ -40,32 +40,47 @@ def risk_capability(risk_fn: Callable) -> Capability:
                       frozenset({"signal"}), frozenset({"decision"}), run, cost=2)
 
 
-def answer_capability(answer_fn: Callable) -> Capability:
+def _answer_stream(stream_fn: Callable | None):
+    """Build the optional ``stream(ctx, emit)`` for an answer capability, if a
+    streaming worker ``stream_fn(question, emit) -> str`` was supplied."""
+    if stream_fn is None:
+        return None
+
+    def stream(ctx: Context, emit: Callable[[dict], None]) -> dict:
+        return {"answer": stream_fn(ctx.facts.get("question", ""), emit)}
+    return stream
+
+
+def answer_capability(answer_fn: Callable, *, stream_fn: Callable | None = None) -> Capability:
     """Wrap the existing LangGraph ReAct agent as ONE capability: question → answer.
 
     This is the point of the kernel — LangGraph becomes a capability inside the
-    loop, not the top-level orchestrator. ``answer_fn(question) -> str``.
+    loop, not the top-level orchestrator. ``answer_fn(question) -> str`` (blocking);
+    optional ``stream_fn(question, emit) -> str`` streams inner tokens via ``emit``.
     """
     def run(ctx: Context) -> dict:
         return {"answer": answer_fn(ctx.facts.get("question", ""))}
     return Capability("langgraph_answer",
                       "General / open-ended Q&A (concepts, coding, outside info) via a "
                       "general agent with web search. NOT for our own market data.",
-                      frozenset({"question"}), frozenset({"answer"}), run, cost=3)
+                      frozenset({"question"}), frozenset({"answer"}), run, cost=3,
+                      stream=_answer_stream(stream_fn))
 
 
-def domain_capability(answer_fn: Callable) -> Capability:
+def domain_capability(answer_fn: Callable, *, stream_fn: Callable | None = None) -> Capability:
     """Wrap the read-only market-tools ReAct agent as ONE capability: question →
     answer, using live domain tools (scan / orderbook / evaluate). Same effect as
     ``langgraph_answer`` so the controller picks by *fit* — this one when the
-    question is about OUR prediction markets / data / evaluation. ``answer_fn(q)->str``.
+    question is about OUR prediction markets / data / evaluation. ``answer_fn(q)->str``;
+    optional ``stream_fn(q, emit) -> str`` streams inner tokens.
     """
     def run(ctx: Context) -> dict:
         return {"answer": answer_fn(ctx.facts.get("question", ""))}
     return Capability("domain_answer",
                       "Q&A about OUR prediction markets / data / evaluation using live "
                       "read-only tools (scan markets, orderbook, calibration/evaluate).",
-                      frozenset({"question"}), frozenset({"answer"}), run, cost=3)
+                      frozenset({"question"}), frozenset({"answer"}), run, cost=3,
+                      stream=_answer_stream(stream_fn))
 
 
 def strategy_capability(run_strategy_fn: Callable) -> Capability:

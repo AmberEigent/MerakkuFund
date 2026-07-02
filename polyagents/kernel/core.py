@@ -26,6 +26,12 @@ class Capability:
     effects: frozenset[str]
     run: Callable[["Context"], dict]
     cost: int = 1
+    # Optional streaming variant: ``stream(ctx, emit) -> facts`` where ``emit`` is
+    # called with token/tool events as the work happens. When present (and the loop
+    # has an ``on_event`` sink) it is preferred over ``run`` — this is what breaks
+    # the "double black box": a capability's inner tokens flow out live instead of
+    # only its final return value.
+    stream: Callable[["Context", Callable[[dict], None]], dict] | None = None
 
 
 @dataclass(frozen=True)

@@ -136,7 +136,10 @@ class KernelController:
                     continue
                 self._emit({"type": "capability.start", "name": cap.name})
                 try:
-                    produced = cap.run(ctx) or {}
+                    if cap.stream is not None and self.on_event is not None:
+                        produced = cap.stream(ctx, self.on_event) or {}   # inner tokens flow out live
+                    else:
+                        produced = cap.run(ctx) or {}
                 except Exception as exc:                      # surface, let the model re-plan
                     ctx.trace.append(Step(cap.name, [], ok=False, note=str(exc)))
                     notes.append(f"- {cap.name} failed: {exc}")
