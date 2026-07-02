@@ -66,6 +66,15 @@ def _short(v: Any, n: int = 160) -> str:
     return s if len(s) <= n else s[:n] + "…"
 
 
+def _render_history(history, max_turns: int = 8) -> str:
+    """Compact transcript of the recent conversation (bounded, for prompt context)."""
+    lines = []
+    for role, content in (history or [])[-max_turns:]:
+        who = "User" if str(role) == "user" else "Assistant"
+        lines.append(f"{who}: {_short(content, 300)}")
+    return "\n".join(lines)
+
+
 class KernelController:
     """LLM-driven controller over a capability registry.
 
@@ -82,6 +91,7 @@ class KernelController:
         self.max_steps = max_steps
         self.on_event = on_event
         self.audit = audit
+        self._history: list = []
 
     def _emit(self, event: dict) -> None:
         if self.on_event:
@@ -109,15 +119,19 @@ class KernelController:
         facts = "\n".join(f"- {k}: {_short(v)}" for k, v in ctx.facts.items()
                           if k != "question") or "- (none)"
         steps = "\n".join(notes) or "- (none yet)"
-        user = (f"User request: {request}\n\nFacts gathered so far:\n{facts}\n\n"
+        convo = _render_history(self._history)
+        prefix = f"Conversation so far:\n{convo}\n\n" if convo else ""
+        user = (f"{prefix}User request: {request}\n\nFacts gathered so far:\n{facts}\n\n"
                 f"Capabilities you can call now:\n{menu}\n\nSteps so far:\n{steps}\n\n"
-                "Next action? JSON only.")
+                "Next action? Resolve references to earlier turns from the conversation. "
+                "JSON only.")
         try:
             return _parse(_text_of(self.llm.invoke([("system", _SYS), ("user", user)])))
         except Exception:
             return {}
 
-    def run(self, request: str, **facts) -> KernelResult:
+    def run(self, request: str, *, history=None, **facts) -> KernelResult:
+        self._history = list(history or [])               # prior conversation turns
         ctx = Context(Goal(frozenset(), {"question": request, **facts}, "kernel"))
         notes: list[str] = []
         decided = 0                                       # usable LLM decisions seen
@@ -167,7 +181,9 @@ class KernelController:
         """Budget exhausted — make the model answer from whatever we gathered.
         Returns ``(answer, ok)`` where ok is False if the LLM was unusable."""
         facts = "\n".join(f"- {k}: {_short(v)}" for k, v in ctx.facts.items() if k != "question")
-        user = (f"User request: {request}\n\nFacts gathered:\n{facts or '- (none)'}\n\n"
+        convo = _render_history(getattr(self, "_history", []))
+        prefix = f"Conversation so far:\n{convo}\n\n" if convo else ""
+        user = (f"{prefix}User request: {request}\n\nFacts gathered:\n{facts or '- (none)'}\n\n"
                 "Give the final answer to the user now (plain text).")
         try:
             text = _text_of(self.llm.invoke([("system", _SYS), ("user", user)])).strip()

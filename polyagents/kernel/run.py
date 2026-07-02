@@ -49,10 +49,11 @@ def _as_context(result: KernelResult) -> Context:
 
 
 def run_mode(mode: str, *, request: str | None = None, registry: list | None = None,
-             max_steps: int = 12, llm=None, fallback_planner=None, audit=None,
-             on_event=None, **facts) -> Context:
+             max_steps: int = 12, llm=None, history=None, fallback_planner=None,
+             audit=None, on_event=None, **facts) -> Context:
     """Run ``mode`` through the kernel. ``registry`` overrides the wiring (tests);
-    ``llm`` overrides the controller model (kernel mode). Returns a Context."""
+    ``llm`` overrides the controller model; ``history`` is the prior conversation
+    (kernel mode, cross-turn memory). Returns a Context."""
     reg = registry if registry is not None else registry_for(mode)
     if mode == "kernel":
         controller_llm = llm if llm is not None else _default_controller_llm()
@@ -60,7 +61,7 @@ def run_mode(mode: str, *, request: str | None = None, registry: list | None = N
             ctrl_facts = {"event": request, **facts}   # so data_agent is selectable by the LLM
             ctrl = KernelController(reg, controller_llm, max_steps=max_steps,
                                     on_event=on_event, audit=audit)
-            result = ctrl.run(request or "", **ctrl_facts)
+            result = ctrl.run(request or "", history=history, **ctrl_facts)
             if result.llm_ok:                          # controller drove it → done
                 return _as_context(result)
             # LLM unusable (disabled/offline) → deterministic fallback below

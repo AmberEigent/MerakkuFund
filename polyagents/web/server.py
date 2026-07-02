@@ -539,11 +539,19 @@ def _kernel_summary(ctx) -> str:
     return f"**kernel** 无法完成目标 {sorted(ctx.goal.targets)}(路径: {path})。"
 
 
-async def _stream_kernel(last_text: str, session: "AgentSession") -> AsyncIterator[str]:
+async def _stream_kernel(history: list[dict], session: "AgentSession") -> AsyncIterator[str]:
     """Kernel mode: the request goes through the ONE kernel loop, which recognises
     intent and takes the minimal capability path (Q&A via ReAct, or data→backtest,
-    …). Runs the sync loop in a thread and bridges its ``on_event`` to SSE."""
+    …). The prior turns are passed as cross-turn memory. Runs the sync loop in a
+    thread and bridges its ``on_event`` to SSE."""
     from polyagents.kernel import run_mode
+
+    # split the conversation into the current request + the prior turns (memory)
+    last_idx = next((i for i in range(len(history) - 1, -1, -1)
+                     if history[i].get("role") == "user"), None)
+    last_text = str(history[last_idx].get("content", "")) if last_idx is not None else ""
+    prior = [(m.get("role"), str(m.get("content", "")))
+             for m in history[:last_idx]] if last_idx is not None else []
 
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
@@ -553,7 +561,7 @@ async def _stream_kernel(last_text: str, session: "AgentSession") -> AsyncIterat
 
     def work() -> None:
         try:
-            ctx = run_mode("kernel", request=last_text, on_event=on_event)
+            ctx = run_mode("kernel", request=last_text, history=prior, on_event=on_event)
             loop.call_soon_threadsafe(q.put_nowait, {"type": "_result", "ctx": ctx})
         except Exception as exc:                        # surface, don't crash the stream
             loop.call_soon_threadsafe(q.put_nowait, {"type": "_error", "message": str(exc)})
@@ -605,11 +613,12 @@ async def _stream(history: list[dict], skills: list[str], model: str | None = No
     # route the question to a Domain (tools) or General (web_search) handler
     last_text = next((str(m.get("content", "")) for m in reversed(history)
                       if m.get("role") == "user"), "")
-    # Kernel mode: one goal-directed loop auto-recognises intent + picks the path.
+    # Kernel mode: one goal-directed loop auto-recognises intent + picks the path,
+    # with the prior turns as cross-turn memory.
     if mode == "kernel":
         session.log("session.start", model=model, skills=skills,
                     attachments=len(attachments or []))
-        async for ev in _stream_kernel(last_text, session):
+        async for ev in _stream_kernel(history, session):
             yield ev
         return
     route, by = classify(last_text, manual=(mode if mode in ("domain", "general") else None),
