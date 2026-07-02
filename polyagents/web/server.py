@@ -561,10 +561,16 @@ async def _stream_kernel(last_text: str, session: "AgentSession") -> AsyncIterat
     fut = loop.run_in_executor(None, work)
     session.log("route.decided", route="kernel", by="manual")
     yield _sse({"type": "route", "route": "kernel", "by": "manual"})
+    streamed = False                                    # did any real token flow out?
     while True:
         ev = await q.get()
         t = ev.get("type")
-        if t == "capability.start":
+        if t == "token":                                # inner capability tokens — real streaming
+            streamed = True
+            yield _sse({"type": "token", "text": ev.get("text", "")})
+        elif t in ("tool", "tool_result"):              # inner tool-calls (e.g. web_search)
+            yield _sse(ev)
+        elif t == "capability.start":
             session.log("kernel.capability", name=ev.get("name"))
             yield _sse({"type": "tool", "name": ev.get("name")})
         elif t == "capability.done":
@@ -572,8 +578,9 @@ async def _stream_kernel(last_text: str, session: "AgentSession") -> AsyncIterat
         elif t == "capability.error":
             yield _sse({"type": "error", "message": f"{ev.get('name')}: {ev.get('error')}"})
         elif t == "_result":
-            for chunk in _chunk_text(_kernel_summary(ev["ctx"])):
-                yield _sse({"type": "token", "text": chunk})
+            if not streamed:                            # nothing streamed → emit the summary/answer
+                for chunk in _chunk_text(_kernel_summary(ev["ctx"])):
+                    yield _sse({"type": "token", "text": chunk})
             break
         elif t == "_error":
             yield _sse({"type": "error", "message": ev["message"]})

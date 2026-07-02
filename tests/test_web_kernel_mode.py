@@ -21,8 +21,20 @@ def _fake_run_mode(mode, *, request=None, on_event=None, **kw):
     return ctx
 
 
-def _collect(history, mode, monkeypatch):
-    monkeypatch.setattr(kernel, "run_mode", _fake_run_mode)
+def _streaming_run_mode(mode, *, request=None, on_event=None, **kw):
+    # a capability that streams inner tokens live (Step 4/5 contract)
+    on_event({"type": "capability.start", "name": "langgraph_answer"})
+    for tok in ["Hel", "lo"]:
+        on_event({"type": "token", "text": tok})
+    on_event({"type": "capability.done", "name": "langgraph_answer", "produced": ["answer"]})
+    ctx = Context(Goal(frozenset({"answer"}), {"question": request}, "kernel"))
+    ctx.facts["answer"] = "Hello"                       # same content already streamed
+    ctx.trace.append(Step("langgraph_answer", ["answer"], ok=True))
+    return ctx
+
+
+def _collect(history, mode, monkeypatch, fake=_fake_run_mode):
+    monkeypatch.setattr(kernel, "run_mode", fake)
 
     async def go():
         return [json.loads(s.split("data:", 1)[1].strip())
@@ -43,6 +55,14 @@ def test_kernel_mode_routes_through_the_loop(monkeypatch):
     text = "".join(e["text"] for e in events if e["type"] == "token")
     assert "kernel-answered: 什么是校准" in text
     assert types[-1] == "done"
+
+
+def test_kernel_mode_forwards_live_tokens_without_duplicating(monkeypatch):
+    events = _collect([{"role": "user", "content": "hi"}], "kernel", monkeypatch,
+                      fake=_streaming_run_mode)
+    text = "".join(e["text"] for e in events if e["type"] == "token")
+    assert text == "Hello"          # streamed once, NOT re-appended from _kernel_summary
+    assert [e["type"] for e in events][-1] == "done"
 
 
 def test_non_kernel_mode_untouched(monkeypatch):
