@@ -110,11 +110,12 @@ class AgentLoop:
     dropped in later). ``audit`` exposes ``.log(...)``; ``on_event`` streams.
     """
     def __init__(self, registry: list[Capability], *, max_steps: int = 12,
-                 planner: Callable = next_capability, audit=None,
-                 on_event: Callable[[dict], None] | None = None) -> None:
+                 planner: Callable = next_capability, fallback_planner: Callable | None = None,
+                 audit=None, on_event: Callable[[dict], None] | None = None) -> None:
         self.registry = list(registry)
         self.max_steps = max_steps
-        self.planner = planner
+        self.planner = planner                 # deterministic goal-directed (zero tokens)
+        self.fallback_planner = fallback_planner  # e.g. an LLM planner for the ambiguous cases
         self.audit = audit
         self.on_event = on_event
 
@@ -138,6 +139,10 @@ class AgentLoop:
         self._audit("loop.start", goal=sorted(goal.targets), label=goal.label)
         for _ in range(self.max_steps):
             cap = self.planner(ctx, self.registry)
+            if cap is None and self.fallback_planner is not None and not ctx.done():
+                cap = self.fallback_planner(ctx, self.registry)   # LLM decides the ambiguous step
+                if cap is not None:
+                    self._audit("planner.fallback", capability=cap.name)
             if cap is None:
                 break
             self._emit({"type": "capability.start", "name": cap.name})

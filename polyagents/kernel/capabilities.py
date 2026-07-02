@@ -40,6 +40,29 @@ def risk_capability(risk_fn: Callable) -> Capability:
                       frozenset({"signal"}), frozenset({"decision"}), run, cost=2)
 
 
+def answer_capability(answer_fn: Callable) -> Capability:
+    """Wrap the existing LangGraph ReAct agent as ONE capability: question → answer.
+
+    This is the point of the kernel — LangGraph becomes a capability inside the
+    loop, not the top-level orchestrator. ``answer_fn(question) -> str``.
+    """
+    def run(ctx: Context) -> dict:
+        return {"answer": answer_fn(ctx.facts.get("question", ""))}
+    return Capability("langgraph_answer", "Open-ended Q&A via the LangGraph ReAct agent.",
+                      frozenset({"question"}), frozenset({"answer"}), run, cost=3)
+
+
+def strategy_capability(run_strategy_fn: Callable) -> Capability:
+    """Wrap the multi-agent Strategy supervisor as one capability: market → decision.
+
+    ``run_strategy_fn(market) -> decision`` (the supervisor's own data→signal→risk
+    loop runs inside this single capability)."""
+    def run(ctx: Context) -> dict:
+        return {"decision": run_strategy_fn(ctx.facts["market"])}
+    return Capability("strategy", "Run the data→signal→risk Strategy supervisor.",
+                      frozenset({"market"}), frozenset({"decision"}), run, cost=4)
+
+
 def build_registry(*, fetch_fn: Callable, backtest_fn: Callable | None = None,
                    signal_fn: Callable | None = None,
                    risk_fn: Callable | None = None) -> list[Capability]:

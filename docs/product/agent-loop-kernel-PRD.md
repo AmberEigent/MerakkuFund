@@ -56,7 +56,14 @@ risk_agent      precond:{signal}   effect:{decision}
 - ✅ `kernel/capabilities.py`:data/backtest/signal/risk 能力(DI)+ 注册表构造器。
 - ✅ `kernel/intent.py`:规则版 recognize(backtest/trade/evaluate/ask)。
 - ✅ 契约测试:backtest 目标 → 仅 data+backtest(跳过 signal/risk)、目标已达成不动、卡死即停、步数上限、**加能力自动纳入**、审计落点。
-- ⬜ 不在 P1:LLM Planner 兜底(P2)、真实 event→市场解析的端到端、trade/live mode 风控门。
+- ⬜ 不在 P1:LLM Planner 兜底、真实 event→市场端到端、把 LangGraph/Strategy 接成 Capability(见 P2)、trade/live mode 风控门。
+
+## 六·P2(已实现)
+
+- **LLM Planner 兜底** `kernel/llm_planner.py`:确定性 planner 卡死(目标模糊)时,把"目标 + 已知 facts + 当前可运行能力"给模型选下一个(或 stop);`AgentLoop(fallback_planner=...)` 接入,确定性优先、LLM 只兜底。
+- **LangGraph/Strategy → Capability**:`answer_capability`(把 Ask ReAct agent 当"问答"能力)、`strategy_capability`(把 data→signal→risk Supervisor 当一个能力)——**LangGraph 退化为内核里的一种能力**。
+- **真实端到端** `kernel/wiring.py::default_registry()`:data(取已结算市场)+ backtest(BacktestRunner.replay)+ answer + strategy。实测:backtest 目标 → **仅走 data→backtest**(注册表里的 answer/strategy 未被调),产出真实报告(6 市场,NO EDGE,诚实)。
+- 测试 `tests/test_kernel_p2.py`(5):LLM planner 选择/停止/未知、loop 用 LLM 兜底、answer/strategy 能力在 loop 内跑通。
 
 ## 七、验收
 
