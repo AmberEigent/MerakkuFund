@@ -36,7 +36,8 @@ def _build_prompt(state: dict) -> str:
 
 
 def create_reflection_agent(llm) -> Node:
-    structured = llm.with_structured_output(Reflection)
+    from polyagents.llm import structured_output
+    structured = structured_output(llm, Reflection)
 
     def node(state: dict) -> dict[str, Any]:
         reflection: Reflection = structured.invoke(_build_prompt(state))
