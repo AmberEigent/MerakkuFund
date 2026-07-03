@@ -60,7 +60,8 @@ def _build_prompt(state: dict, lessons: list[str], similar: list[dict]) -> str:
 def create_signal_agent(llm, memory=None, rag=None) -> Node:
     """``memory`` injects recent lessons; ``rag`` (a ChromaRAG) injects
     semantically similar past markets — both optional."""
-    structured = llm.with_structured_output(Signal)
+    from polyagents.llm import structured_output
+    structured = structured_output(llm, Signal)
 
     def node(state: dict) -> dict[str, Any]:
         lessons = memory.recent_lessons(question=state.get("question")) if memory is not None else []

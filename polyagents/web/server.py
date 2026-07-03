@@ -51,8 +51,8 @@ def _classifier_llm():
     global _CLASSIFIER_LLM
     if _CLASSIFIER_LLM is None:
         try:
-            from langchain_anthropic import ChatAnthropic
-            _CLASSIFIER_LLM = ChatAnthropic(model="claude-haiku-4-5-20251001", temperature=0.0)
+            from polyagents.llm import build_chat_llm
+            _CLASSIFIER_LLM = build_chat_llm(model="claude-haiku-4-5-20251001", temperature=0.0)
         except Exception:
             _CLASSIFIER_LLM = False        # unavailable → classify falls back to 'domain'
     return _CLASSIFIER_LLM or None
@@ -523,21 +523,143 @@ async def upload(files: list[UploadFile] = File(...)) -> JSONResponse:
     return JSONResponse({"files": out})
 
 
+def _format_market_analysis(a: dict, path: str) -> str:
+    """Render the Goal-1 framework result (explore→reason→analyze→backtest→conclude)."""
+    if a.get("error"):
+        return f"**kernel** {path}\n\n分析失败:{a['error']}"
+    m = a.get("market", {})
+    r = a.get("reasoning", {})
+    bt = a.get("backtest", {})
+    c = a.get("conclusion", {})
+    ms = a.get("microstructure", {})
+    sim = a.get("similar_markets", []) or []
+    lines = [f"**市场分析框架** · {path}", ""]
+    lines.append(f"**标的**:{m.get('question')}  \n价格 {m.get('price')} · 类别 {m.get('category')} · "
+                 f"{m.get('days_to_expiry')} 天到期 · 流动性 {m.get('liquidity')}")
+    if "p_true" in r:
+        lines.append(f"\n**① 推理(p_true)**:{r['p_true']:.2f} ({r.get('direction')}, "
+                     f"{r.get('conviction')})  \n{r.get('rationale', '')}")
+    else:
+        lines.append(f"\n**① 推理**:{r.get('note', 'n/a')}")
+    if ms:
+        top = ", ".join(f"{k}={round(v, 3) if isinstance(v, (int, float)) else v}"
+                        for k, v in list(ms.items())[:6])
+        lines.append(f"\n**② 数据分析(微结构/flow 因子)**:{top}")
+    n_bt = bt.get("n_markets") or 0
+    if n_bt:
+        small = "(样本不足 n<10,仅供参考)" if n_bt < 10 else ""
+        lines.append(f"\n**③ 回溯对比**:同类已结算 {n_bt} 个市场上,该信号 "
+                     f"brier_delta={bt.get('brier_delta')} · beats_market={bt.get('beats_market')} · "
+                     f"ci={bt.get('ci')} {small}")
+    else:
+        lines.append(f"\n**③ 回溯对比**:{bt.get('note', '无可回测的同类历史')}")
+    if sim:
+        prec = "; ".join(f"{s.get('question', '')[:48]}→{s.get('resolved_winner')}" for s in sim[:3])
+        lines.append(f"\n**④ 相似历史市场(已结算先例)**:{prec}")
+    else:
+        lines.append("\n**④ 相似历史市场**:无已结算先例(相似市场尚未结算,不作对比)")
+    if "action" in c:
+        lines.append(f"\n**⑤ 结论**:**{c['action'].upper()}** · edge={c.get('edge')} "
+                     f"(p_cal={c.get('p_calibrated')}) · APY={c.get('annualized_edge')} · "
+                     f"size=${c.get('size_usdc')}")
+        if c.get("reasons"):
+            lines.append("　理由:" + "；".join(str(x) for x in c["reasons"][:4]))
+        if c.get("risk_flags"):
+            lines.append("　风险:" + "；".join(str(x) for x in c["risk_flags"][:4]))
+    else:
+        lines.append(f"\n**⑤ 结论**:{c.get('note', 'n/a')}")
+    return "\n".join(lines)
+
+
+def _answer_text(f) -> str:
+    body = f.get("answer", "")
+    if isinstance(body, list):
+        body = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in body)
+    return str(body)
+
+
+def _format_strategy_comparison(c: dict, path: str) -> str:
+    """Render the multi-strategy backtest comparison over a domain's resolved markets."""
+    strats = c.get("strategies") or []
+    lines = [f"**策略对比回测** · {path}", "",
+             f"**领域**:{c.get('domain')} · 已结算市场 {c.get('n_markets')} 个"]
+    if not strats:
+        lines.append("\n" + (c.get("note") or "该领域没有足够的已结算市场可回测,换个领域再试。"))
+        return "\n".join(lines)
+    lines.append("\n| 策略 | brier_delta | 跑赢市场 | 95% CI |")
+    lines.append("|---|---|---|---|")
+    for s in strats:
+        win = "✅" if s.get("beats_market") else "❌"
+        lo, hi = (s.get("ci") or [0.0, 0.0])[:2]
+        lines.append(f"| {s['name']} | {s['brier_delta']:+.4f} | {win} | [{lo:+.4f}, {hi:+.4f}] |")
+    best = c.get("best")
+    if best:
+        tail = "——跑赢市场 ✅" if best.get("beats_market") else "——但仍未跑赢市场,无 alpha。"
+        lines.append(f"\n**最优**:{best['name']}(brier_delta={best['brier_delta']:+.4f}){tail}")
+    lines.append("\n_注:brier_delta 正=跑赢市场(模型 Brier 更低);naive=直接信市场价的基准(≈0),"
+                 "任何策略要证明有效,得稳定地做到正 delta 且 CI 不含 0。_")
+    return "\n".join(lines)
+
+
+def _format_recommendation(r: dict, path: str) -> str:
+    """Render the Goal-2 result: topic → ranked candidates → recommended target."""
+    ranked = r.get("ranked") or []
+    top = r.get("top_pick")
+    def _side(s):                                       # show YES/NO so p_true isn't misread
+        o = s.get("outcome")
+        return f" [{o}]" if o else ""
+    lines = [f"**标的推荐** · {path}", "", f"**主题**:{r.get('topic')}"]
+    if not ranked:
+        lines.append("\n未找到与该主题相关的活跃可交易标的。可换个更具体的主题(球队/资产/事件名),或直接指定一个市场做分析。")
+        return "\n".join(lines)
+    if not r.get("has_positive_edge", True):            # honest: nothing underpriced
+        lines.append("\n⚠ 该主题下**没有被低估(正 edge)的标的**——候选当前都偏贵或接近合理定价。"
+                     "下面按相对机会排序,仅供观察,均未达下注门槛。")
+    if top:
+        act = (top.get("action") or "hold").upper()
+        lines.append(f"\n**推荐**:{top.get('question')}{_side(top)}  \n"
+                     f"→ **{act}** · p_true={top.get('p_true')} · edge={top.get('edge')} · "
+                     f"APY={top.get('annualized_edge')} · 价 {top.get('price')}")
+        if top.get("rationale"):
+            lines.append(f"　理由:{top['rationale']}")
+    if len(ranked) > 1:
+        lines.append(f"\n**候选排序(共分析 {r.get('n_scored')} 个 · 正 edge=被低估优先)**:")
+        for i, s in enumerate(ranked, 1):
+            lines.append(f"{i}. {(s.get('question') or '')[:56]}{_side(s)} — "
+                         f"{(s.get('action') or 'hold').upper()} · edge={s.get('edge')} · p_true={s.get('p_true')}")
+    lines.append("\n_注:edge<6% 门槛者结论为 HOLD;正 edge=被低估(潜在做多),负 edge=偏贵。"
+                 "可对推荐标的再跑 analyze_market 看完整框架。_")
+    return "\n".join(lines)
+
+
 def _kernel_summary(ctx) -> str:
-    """Render a kernel Context into a readable answer for the chat bubble."""
+    """Render a kernel Context into a readable answer for the chat bubble.
+
+    Grounded structured deliverables (the analysis framework, batch results) take
+    priority over the controller's free-text ``answer`` so the user sees the full,
+    numeric result — the controller's takeaway is appended when present."""
     f = ctx.facts
     path = " → ".join(s.capability for s in ctx.trace) or "(no steps)"
-    if "answer" in f:                                   # ReAct capability — its text IS the answer
-        body = f["answer"]
-        if isinstance(body, list):
-            body = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in body)
-        return str(body)
+    if "recommendation" in f:                           # Goal-2: topic → recommended target
+        out = _format_recommendation(f["recommendation"], path)
+        if "market_analysis" in f:                      # controller also deep-analyzed the pick
+            out += "\n\n---\n\n" + _format_market_analysis(f["market_analysis"], path)
+        return out
+    if "market_analysis" in f:                          # Goal-1 framework IS the grounded answer
+        return _format_market_analysis(f["market_analysis"], path)  # no free-text append (avoids hallucinated punditry)
+    if "collections" in f:
+        c = f["collections"]
+        return (f"**kernel** {path}\n\n批量采集 · 市场数={c.get('n_markets')} · "
+                f"store={c.get('store_counts')}")
+    if "strategy_comparison" in f:                       # multi-strategy backtest comparison
+        return _format_strategy_comparison(f["strategy_comparison"], path)
     if "backtest_report" in f:
         r = f["backtest_report"]
-        return (f"**kernel** {path}\n\n"
-                f"回测 · event={r.get('event')} · n_markets={r.get('n_markets')} · "
+        return (f"**kernel** {path}\n\n回测 · event={r.get('event')} · n_markets={r.get('n_markets')} · "
                 f"brier_delta={r.get('brier_delta')} · beats_market={r.get('beats_market')} · "
                 f"ci={r.get('ci')}")
+    if "answer" in f:                                   # ReAct / Q&A capability — its text IS the answer
+        return _answer_text(f)
     if "decision" in f:
         return f"**kernel** {path}\n\ndecision: {f['decision']}"
     if "evaluation" in f:

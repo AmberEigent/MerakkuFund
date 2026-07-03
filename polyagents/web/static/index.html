@@ -594,7 +594,7 @@
           <div id="dropHint" class="drop-hint">松开以添加文件</div>
           <div class="ctoolbar">
             <button class="cplus" id="plusBtn" title="Add" onclick="toggleCMenu(event,'plusMenu')">＋</button>
-            <button class="ctbtn" id="modeBtn" title="回答模式(Ask 只读)" onclick="toggleCMenu(event,'modeMenu')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg><span id="modeLbl">Auto</span><span class="cv">▾</span></button>
+            <button class="ctbtn" id="modeBtn" title="回答模式(Ask 只读)" onclick="toggleCMenu(event,'modeMenu')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg><span id="modeLbl">Kernel</span><span class="cv">▾</span></button>
             <button class="ctbtn" id="modelBtn" title="模型" onclick="toggleCMenu(event,'modelMenu')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span id="modelLbl">Sonnet 4.6</span><span class="cv">▾</span></button>
             <span class="cspacer"></span>
             <button class="cicon" title="附件" onclick="document.getElementById('fileInput').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5 12 21a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 17a1.5 1.5 0 0 1-2-2l8-8"/></svg></button>
@@ -608,10 +608,10 @@
           </div>
           <div class="cpop" id="skillsFly"></div>
           <div class="cpop" id="modeMenu">
-            <button class="cmrow" onclick="pickMode('auto','Auto',this)">Auto<small>自动分类(规则+Haiku)</small><span class="ctick">✓</span></button>
+            <button class="cmrow" onclick="pickMode('kernel','Kernel',this)">Kernel<small>目标驱动·内核总循环(自动识别→选能力→动手)</small><span class="ctick">✓</span></button>
+            <button class="cmrow" onclick="pickMode('auto','Auto',this)">Auto<small>自动分类(规则+Haiku)</small></button>
             <button class="cmrow" onclick="pickMode('domain','Domain',this)">Domain<small>市场/数据/评估(领域工具)</small></button>
             <button class="cmrow" onclick="pickMode('general','General',this)">General<small>泛问题/编码/web 搜索</small></button>
-            <button class="cmrow" onclick="pickMode('kernel','Kernel',this)">Kernel<small>目标驱动·内核总循环(自动识别→最短路径)</small></button>
           </div>
           <div class="cpop" id="modelMenu">
             <button class="cmrow" onclick="pickModel('claude-sonnet-4-6','Sonnet 4.6',this)">Sonnet 4.6<small>均衡 · 默认</small><span class="ctick">✓</span></button>
@@ -854,7 +854,7 @@ function pickModel(id, label, el){
   el.appendChild(tick);
   closeCMenus();
 }
-let selectedMode = 'auto';
+let selectedMode = 'kernel';
 function pickMode(id, label, el){
   selectedMode = id;
   document.getElementById('modeLbl').textContent = label;

@@ -2,6 +2,7 @@
 langgraph>=0.2.0
 langchain-core>=0.3.0
 langchain-anthropic>=0.2.0
+langchain-openai>=0.2.0      # OpenAI-compatible providers (DeepSeek, LiteLLM gateway, …)
 # MCP tools at runtime (Polymarket docs MCP -> LangGraph tools)
 langchain-mcp-adapters>=0.1.0
 # MCP server — expose polyagents as tools for an Alpha DevBox-style host
