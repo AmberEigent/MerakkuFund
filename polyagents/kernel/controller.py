@@ -26,6 +26,10 @@ _SYS = (
     "gather what you still need, OR give the final answer to the user. Prefer the "
     "fewest steps: only call a capability when you actually need its result; if you "
     "can already answer, answer.\n"
+    "When the user asks you to DO something (run / collect / 采集 / 批量 / backtest / "
+    "scan and persist), call the matching ACTION capability and actually perform it — "
+    "do not just answer with a Q&A capability. Chain steps when one produces what the "
+    "next needs (e.g. scan_markets → batch_collect).\n"
     "Reply with ONLY one JSON object, nothing else:\n"
     '  {"action": "call", "capability": "<name from the menu>"}\n'
     '  {"action": "final", "answer": "<the answer to the user>"}'

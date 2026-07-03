@@ -77,10 +77,59 @@ def domain_capability(answer_fn: Callable, *, stream_fn: Callable | None = None)
     def run(ctx: Context) -> dict:
         return {"answer": answer_fn(ctx.facts.get("question", ""))}
     return Capability("domain_answer",
-                      "Q&A about OUR prediction markets / data / evaluation using live "
-                      "read-only tools (scan markets, orderbook, calibration/evaluate).",
+                      "ANSWER A QUESTION about OUR prediction markets / data / evaluation "
+                      "(read-only look-ups: one market's orderbook, calibration/evaluate, "
+                      "'what is the price of…'). Use ONLY to explain/answer — NOT to run a "
+                      "batch job, collect/persist data, or backtest (use the batch_* / "
+                      "scan_markets capabilities for those actions).",
                       frozenset({"question"}), frozenset({"answer"}), run, cost=3,
                       stream=_answer_stream(stream_fn))
+
+
+def scan_capability(scan_fn: Callable) -> Capability:
+    """Scan a BATCH of live markets — the first step of any batch data/backtest job.
+
+    ``scan_fn(query) -> dict`` returns ``{"markets": [...], "count": n, ...}``. The
+    batch lands on the blackboard as ``market_batch`` so ``batch_collect`` /
+    ``batch_backtest`` can chain off it without re-scanning."""
+    def run(ctx: Context) -> dict:
+        query = ctx.facts.get("question") or ctx.facts.get("event")
+        return {"market_batch": scan_fn(query)}
+    return Capability("scan_markets",
+                      "Scan/list a BATCH of live markets (most-active first, optionally "
+                      "by the request's category). The first step for any 'batch run data', "
+                      "batch collection, or batch backtest job.",
+                      frozenset({"question"}), frozenset({"market_batch"}), run, cost=1)
+
+
+def batch_collect_capability(collect_fn: Callable) -> Capability:
+    """Batch-collect Layer-1 data for every market in the scanned batch → persist.
+
+    ``collect_fn(market_batch) -> dict`` runs the L1 collector per market and writes
+    through to the local store, returning how much was collected."""
+    def run(ctx: Context) -> dict:
+        return {"collections": collect_fn(ctx.facts["market_batch"])}
+    return Capability("batch_collect",
+                      "Batch-collect Layer-1 data (price / order-book microstructure / "
+                      "trade-flow / factors) for EVERY market in the scanned batch and "
+                      "persist it to the local store; returns how many markets / candles / "
+                      "trades were collected. This is the action for 'batch run data'.",
+                      frozenset({"market_batch"}), frozenset({"collections"}), run, cost=3)
+
+
+def batch_backtest_capability(backtest_fn: Callable) -> Capability:
+    """Backtest a signal across a whole batch of resolved markets → aggregate report.
+
+    ``backtest_fn(query) -> dict`` slices resolved markets by the request and replays
+    a deterministic signal, scoring vs the market baseline."""
+    def run(ctx: Context) -> dict:
+        query = ctx.facts.get("question") or ctx.facts.get("event")
+        return {"backtest_report": backtest_fn(query)}
+    return Capability("batch_backtest",
+                      "Backtest a signal across a BATCH of resolved markets (sliced by the "
+                      "request's category) → aggregate alpha / Brier report vs the market "
+                      "baseline. Use for 'batch backtest' over many markets at once.",
+                      frozenset({"question"}), frozenset({"backtest_report"}), run, cost=4)
 
 
 def strategy_capability(run_strategy_fn: Callable) -> Capability:

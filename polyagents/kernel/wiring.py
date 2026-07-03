@@ -7,8 +7,10 @@ the production wiring). Needs network / ANTHROPIC_API_KEY at run time.
 """
 from __future__ import annotations
 
-from .capabilities import (answer_capability, backtest_capability, data_capability,
-                           domain_capability, strategy_capability)
+from .capabilities import (answer_capability, backtest_capability,
+                           batch_backtest_capability, batch_collect_capability,
+                           data_capability, domain_capability, scan_capability,
+                           strategy_capability)
 
 
 def _chunk_text(content) -> str:
@@ -61,13 +63,43 @@ def default_registry() -> list:
             yes = [m for m in yes if categorize(m.question) == cat]
         return {"event": event, "category": cat, "markets": yes}
 
-    def backtest(history):
+    def _replay(markets, event=None):
         out = BacktestRunner(client=eng.client, max_markets=20).replay(
-            category=None, markets=history["markets"])
+            category=None, markets=markets)
         s = out["summary"]
-        return {"event": history.get("event"), "n_markets": out["n_markets"],
+        return {"event": event, "n_markets": out["n_markets"],
                 "brier_delta": s.brier_delta, "beats_market": s.beats_market,
                 "ci": list(s.brier_delta_ci)}
+
+    def backtest(history):
+        return _replay(history["markets"], event=history.get("event"))
+
+    # ----- batch data pipeline (scan -> collect / backtest) ------------------
+
+    def scan(query):
+        rows = mcp_server.scan_markets(limit=8, min_volume_24h=20000.0)
+        return {"query": query, "count": len(rows), "markets": rows}
+
+    def batch_collect(market_batch, cap=5):
+        rows = (market_batch or {}).get("markets", [])[:cap]
+        collected = []
+        for row in rows:
+            m = mcp_server._get_market(row.get("token_id", ""))
+            if m is None:
+                continue
+            eng.collect(m)
+            collected.append(row.get("question") or row.get("token_id"))
+        counts = eng.store.counts() if getattr(eng, "store", None) else {}
+        return {"n_markets": len(collected), "collected": collected,
+                "store_counts": counts}
+
+    def batch_backtest(query):
+        cat = categorize(query or "")
+        raw = eng.client.list_resolved_markets(limit=80)
+        yes = [m for m in eng.client.to_markets(raw) if m.outcome == "YES"]
+        if cat != "other":
+            yes = [m for m in yes if categorize(m.question) == cat]
+        return _replay(yes, event=query)
 
     def _last_content(res):
         msgs = res.get("messages", []) if isinstance(res, dict) else []
@@ -100,6 +132,9 @@ def default_registry() -> list:
     return [
         data_capability(fetch),
         backtest_capability(backtest),
+        scan_capability(scan),
+        batch_collect_capability(batch_collect),
+        batch_backtest_capability(batch_backtest),
         answer_capability(answer, stream_fn=answer_stream),
         domain_capability(domain_answer, stream_fn=domain_stream),
         strategy_capability(run_strategy),
