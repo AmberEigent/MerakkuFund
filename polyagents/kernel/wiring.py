@@ -147,8 +147,9 @@ def default_registry() -> list:
         backtest = _replay(yes, event=m.question) if yes else {
             "n_markets": 0, "note": f"no resolved '{cat}' markets to backtest against"}
 
-        try:
-            similar = mcp_server.find_similar_markets(m.question, n=3)
+        try:                                            # 相似历史:只保留已结算(有 winner)的先例
+            similar = [s for s in mcp_server.find_similar_markets(m.question, n=8)
+                       if s.get("resolved_winner")][:3]
         except Exception:
             similar = []
 

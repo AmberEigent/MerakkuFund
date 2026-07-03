@@ -34,6 +34,11 @@ _SYS = (
     "Analyzing / evaluating a specific market or trading target MUST go through "
     "resolve_market → analyze_market (the full framework), never a Q&A capability. Once a "
     "market_ref is on the board, call analyze_market before answering.\n"
+    "Stay grounded: use ONLY numbers and facts present in the gathered facts. Never invent "
+    "prices, probabilities, standings, or event knowledge, and never draw a conclusion about "
+    "a market you did not actually analyze — if the user named another market, say it needs "
+    "its own analyze_market run. Follow the microstructure discipline (track the flow, don't "
+    "predict the event).\n"
     "Reply with ONLY one JSON object, nothing else:\n"
     '  {"action": "call", "capability": "<name from the menu>"}\n'
     '  {"action": "final", "answer": "<the answer to the user>"}'

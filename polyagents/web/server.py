@@ -539,15 +539,19 @@ def _format_market_analysis(a: dict, path: str) -> str:
         top = ", ".join(f"{k}={round(v, 3) if isinstance(v, (int, float)) else v}"
                         for k, v in list(ms.items())[:6])
         lines.append(f"\n**② 数据分析(微结构/flow 因子)**:{top}")
-    if bt.get("n_markets"):
-        lines.append(f"\n**③ 回溯对比**:同类已结算 {bt['n_markets']} 个市场上,该信号 "
+    n_bt = bt.get("n_markets") or 0
+    if n_bt:
+        small = "(样本不足 n<10,仅供参考)" if n_bt < 10 else ""
+        lines.append(f"\n**③ 回溯对比**:同类已结算 {n_bt} 个市场上,该信号 "
                      f"brier_delta={bt.get('brier_delta')} · beats_market={bt.get('beats_market')} · "
-                     f"ci={bt.get('ci')}")
+                     f"ci={bt.get('ci')} {small}")
     else:
         lines.append(f"\n**③ 回溯对比**:{bt.get('note', '无可回测的同类历史')}")
     if sim:
-        prec = "; ".join(f"{s.get('question', '')[:48]}→{s.get('resolved_winner') or '?'}" for s in sim[:3])
-        lines.append(f"\n**④ 相似历史市场**:{prec}")
+        prec = "; ".join(f"{s.get('question', '')[:48]}→{s.get('resolved_winner')}" for s in sim[:3])
+        lines.append(f"\n**④ 相似历史市场(已结算先例)**:{prec}")
+    else:
+        lines.append("\n**④ 相似历史市场**:无已结算先例(相似市场尚未结算,不作对比)")
     if "action" in c:
         lines.append(f"\n**⑤ 结论**:**{c['action'].upper()}** · edge={c.get('edge')} "
                      f"(p_cal={c.get('p_calibrated')}) · APY={c.get('annualized_edge')} · "
@@ -576,10 +580,8 @@ def _kernel_summary(ctx) -> str:
     numeric result — the controller's takeaway is appended when present."""
     f = ctx.facts
     path = " → ".join(s.capability for s in ctx.trace) or "(no steps)"
-    if "market_analysis" in f:                          # Goal-1 framework is the deliverable
-        out = _format_market_analysis(f["market_analysis"], path)
-        takeaway = _answer_text(f).strip()
-        return f"{out}\n\n**Agent 总结**:{takeaway}" if takeaway else out
+    if "market_analysis" in f:                          # Goal-1 framework IS the grounded answer
+        return _format_market_analysis(f["market_analysis"], path)  # no free-text append (avoids hallucinated punditry)
     if "collections" in f:
         c = f["collections"]
         return (f"**kernel** {path}\n\n批量采集 · 市场数={c.get('n_markets')} · "
