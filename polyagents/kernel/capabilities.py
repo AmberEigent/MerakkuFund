@@ -132,6 +132,40 @@ def batch_backtest_capability(backtest_fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"backtest_report"}), run, cost=4)
 
 
+def resolve_market_capability(resolve_fn: Callable) -> Capability:
+    """Resolve the request to ONE concrete market to analyse.
+
+    ``resolve_fn(question) -> dict`` returns ``{"token_id", "question", "price", ...}``
+    (keyword-matched against live markets, else the most active). Lands as
+    ``market_ref`` so ``analyze_market`` can run the framework on it."""
+    def run(ctx: Context) -> dict:
+        return {"market_ref": resolve_fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("resolve_market",
+                      "Resolve the user's request to ONE concrete Polymarket market "
+                      "(by token id, keyword match, or most-active). First step before "
+                      "analyzing a specific market/target.",
+                      frozenset({"question"}), frozenset({"market_ref"}), run, cost=1)
+
+
+def analyze_market_capability(analyze_fn: Callable) -> Capability:
+    """Goal-1 framework for a single target: explore → reason → analyze → backtest
+    (historical comparison) → conclusion, as ONE loop capability.
+
+    ``analyze_fn(market_ref) -> dict`` returns the structured ``market_analysis``
+    (data reports + factors, the LLM p_true reasoning, a backtest of the signal over
+    comparable resolved markets, similar-market precedents, and the sized/risk-gated
+    conclusion). Also the base other trading instruments plug into."""
+    def run(ctx: Context) -> dict:
+        return {"market_analysis": analyze_fn(ctx.facts["market_ref"])}
+    return Capability("analyze_market",
+                      "Full analysis FRAMEWORK for one market/target: explore its data, "
+                      "reason a true probability, analyze microstructure/flow, backtest the "
+                      "signal over comparable resolved markets (historical comparison), and "
+                      "give a sized, risk-gated conclusion. Use when the user wants to "
+                      "analyze / evaluate a specific market or trading target.",
+                      frozenset({"market_ref"}), frozenset({"market_analysis"}), run, cost=4)
+
+
 def strategy_capability(run_strategy_fn: Callable) -> Capability:
     """Wrap the multi-agent Strategy supervisor as one capability: market → decision.
 

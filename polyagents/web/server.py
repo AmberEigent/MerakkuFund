@@ -50,8 +50,8 @@ def _classifier_llm():
     global _CLASSIFIER_LLM
     if _CLASSIFIER_LLM is None:
         try:
-            from langchain_anthropic import ChatAnthropic
-            _CLASSIFIER_LLM = ChatAnthropic(model="claude-haiku-4-5-20251001", temperature=0.0)
+            from polyagents.llm import build_chat_llm
+            _CLASSIFIER_LLM = build_chat_llm(model="claude-haiku-4-5-20251001", temperature=0.0)
         except Exception:
             _CLASSIFIER_LLM = False        # unavailable → classify falls back to 'domain'
     return _CLASSIFIER_LLM or None
@@ -517,21 +517,80 @@ async def upload(files: list[UploadFile] = File(...)) -> JSONResponse:
     return JSONResponse({"files": out})
 
 
+def _format_market_analysis(a: dict, path: str) -> str:
+    """Render the Goal-1 framework result (explore→reason→analyze→backtest→conclude)."""
+    if a.get("error"):
+        return f"**kernel** {path}\n\n分析失败:{a['error']}"
+    m = a.get("market", {})
+    r = a.get("reasoning", {})
+    bt = a.get("backtest", {})
+    c = a.get("conclusion", {})
+    ms = a.get("microstructure", {})
+    sim = a.get("similar_markets", []) or []
+    lines = [f"**市场分析框架** · {path}", ""]
+    lines.append(f"**标的**:{m.get('question')}  \n价格 {m.get('price')} · 类别 {m.get('category')} · "
+                 f"{m.get('days_to_expiry')} 天到期 · 流动性 {m.get('liquidity')}")
+    if "p_true" in r:
+        lines.append(f"\n**① 推理(p_true)**:{r['p_true']:.2f} ({r.get('direction')}, "
+                     f"{r.get('conviction')})  \n{r.get('rationale', '')}")
+    else:
+        lines.append(f"\n**① 推理**:{r.get('note', 'n/a')}")
+    if ms:
+        top = ", ".join(f"{k}={round(v, 3) if isinstance(v, (int, float)) else v}"
+                        for k, v in list(ms.items())[:6])
+        lines.append(f"\n**② 数据分析(微结构/flow 因子)**:{top}")
+    if bt.get("n_markets"):
+        lines.append(f"\n**③ 回溯对比**:同类已结算 {bt['n_markets']} 个市场上,该信号 "
+                     f"brier_delta={bt.get('brier_delta')} · beats_market={bt.get('beats_market')} · "
+                     f"ci={bt.get('ci')}")
+    else:
+        lines.append(f"\n**③ 回溯对比**:{bt.get('note', '无可回测的同类历史')}")
+    if sim:
+        prec = "; ".join(f"{s.get('question', '')[:48]}→{s.get('resolved_winner') or '?'}" for s in sim[:3])
+        lines.append(f"\n**④ 相似历史市场**:{prec}")
+    if "action" in c:
+        lines.append(f"\n**⑤ 结论**:**{c['action'].upper()}** · edge={c.get('edge')} "
+                     f"(p_cal={c.get('p_calibrated')}) · APY={c.get('annualized_edge')} · "
+                     f"size=${c.get('size_usdc')}")
+        if c.get("reasons"):
+            lines.append("　理由:" + "；".join(str(x) for x in c["reasons"][:4]))
+        if c.get("risk_flags"):
+            lines.append("　风险:" + "；".join(str(x) for x in c["risk_flags"][:4]))
+    else:
+        lines.append(f"\n**⑤ 结论**:{c.get('note', 'n/a')}")
+    return "\n".join(lines)
+
+
+def _answer_text(f) -> str:
+    body = f.get("answer", "")
+    if isinstance(body, list):
+        body = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in body)
+    return str(body)
+
+
 def _kernel_summary(ctx) -> str:
-    """Render a kernel Context into a readable answer for the chat bubble."""
+    """Render a kernel Context into a readable answer for the chat bubble.
+
+    Grounded structured deliverables (the analysis framework, batch results) take
+    priority over the controller's free-text ``answer`` so the user sees the full,
+    numeric result — the controller's takeaway is appended when present."""
     f = ctx.facts
     path = " → ".join(s.capability for s in ctx.trace) or "(no steps)"
-    if "answer" in f:                                   # ReAct capability — its text IS the answer
-        body = f["answer"]
-        if isinstance(body, list):
-            body = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in body)
-        return str(body)
+    if "market_analysis" in f:                          # Goal-1 framework is the deliverable
+        out = _format_market_analysis(f["market_analysis"], path)
+        takeaway = _answer_text(f).strip()
+        return f"{out}\n\n**Agent 总结**:{takeaway}" if takeaway else out
+    if "collections" in f:
+        c = f["collections"]
+        return (f"**kernel** {path}\n\n批量采集 · 市场数={c.get('n_markets')} · "
+                f"store={c.get('store_counts')}")
     if "backtest_report" in f:
         r = f["backtest_report"]
-        return (f"**kernel** {path}\n\n"
-                f"回测 · event={r.get('event')} · n_markets={r.get('n_markets')} · "
+        return (f"**kernel** {path}\n\n回测 · event={r.get('event')} · n_markets={r.get('n_markets')} · "
                 f"brier_delta={r.get('brier_delta')} · beats_market={r.get('beats_market')} · "
                 f"ci={r.get('ci')}")
+    if "answer" in f:                                   # ReAct / Q&A capability — its text IS the answer
+        return _answer_text(f)
     if "decision" in f:
         return f"**kernel** {path}\n\ndecision: {f['decision']}"
     if "evaluation" in f:

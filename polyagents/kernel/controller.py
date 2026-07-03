@@ -27,9 +27,13 @@ _SYS = (
     "fewest steps: only call a capability when you actually need its result; if you "
     "can already answer, answer.\n"
     "When the user asks you to DO something (run / collect / 采集 / 批量 / backtest / "
-    "scan and persist), call the matching ACTION capability and actually perform it — "
-    "do not just answer with a Q&A capability. Chain steps when one produces what the "
-    "next needs (e.g. scan_markets → batch_collect).\n"
+    "scan and persist / analyze a market / 分析), call the matching ACTION capability and "
+    "actually perform it — do NOT answer with a generic Q&A capability (langgraph_answer / "
+    "domain_answer) when a specialized capability fits. Chain steps when one produces what "
+    "the next needs (e.g. scan_markets → batch_collect, resolve_market → analyze_market).\n"
+    "Analyzing / evaluating a specific market or trading target MUST go through "
+    "resolve_market → analyze_market (the full framework), never a Q&A capability. Once a "
+    "market_ref is on the board, call analyze_market before answering.\n"
     "Reply with ONLY one JSON object, nothing else:\n"
     '  {"action": "call", "capability": "<name from the menu>"}\n'
     '  {"action": "final", "answer": "<the answer to the user>"}'

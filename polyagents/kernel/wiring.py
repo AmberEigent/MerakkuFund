@@ -7,10 +7,11 @@ the production wiring). Needs network / ANTHROPIC_API_KEY at run time.
 """
 from __future__ import annotations
 
-from .capabilities import (answer_capability, backtest_capability,
-                           batch_backtest_capability, batch_collect_capability,
-                           data_capability, domain_capability, scan_capability,
-                           strategy_capability)
+from .capabilities import (analyze_market_capability, answer_capability,
+                           backtest_capability, batch_backtest_capability,
+                           batch_collect_capability, data_capability,
+                           domain_capability, resolve_market_capability,
+                           scan_capability, strategy_capability)
 
 
 def _chunk_text(content) -> str:
@@ -55,12 +56,17 @@ def default_registry() -> list:
 
     eng = mcp_server.engine()
 
-    def fetch(event):
-        cat = categorize(event or "")
+    def _resolved_yes(query):
+        """Resolved YES-side markets, sliced to the request's keyword category."""
+        cat = categorize(query or "")
         raw = eng.client.list_resolved_markets(limit=80)
         yes = [m for m in eng.client.to_markets(raw) if m.outcome == "YES"]
         if cat != "other":
             yes = [m for m in yes if categorize(m.question) == cat]
+        return cat, yes
+
+    def fetch(event):
+        cat, yes = _resolved_yes(event)
         return {"event": event, "category": cat, "markets": yes}
 
     def _replay(markets, event=None):
@@ -94,12 +100,78 @@ def default_registry() -> list:
                 "store_counts": counts}
 
     def batch_backtest(query):
-        cat = categorize(query or "")
-        raw = eng.client.list_resolved_markets(limit=80)
-        yes = [m for m in eng.client.to_markets(raw) if m.outcome == "YES"]
-        if cat != "other":
-            yes = [m for m in yes if categorize(m.question) == cat]
+        _cat, yes = _resolved_yes(query)
         return _replay(yes, event=query)
+
+    # ----- Goal 1: single-target analysis framework --------------------------
+    #   resolve_market -> analyze_market
+    #   explore -> reason -> analyze -> backtest (historical comparison) -> conclude
+
+    def resolve(query):
+        """Pick ONE concrete market for the request: explicit token id, else best
+        keyword match among live markets, else the most active."""
+        q = (query or "").strip()
+        m = mcp_server._get_market(q) if q else None      # exact token id?
+        if m is None:
+            rows = mcp_server.scan_markets(limit=25, min_volume_24h=0.0)
+            words = {w for w in q.lower().split() if len(w) > 2}
+            best, best_hits = None, 0
+            for row in rows:
+                hits = sum(1 for w in words if w in str(row.get("question", "")).lower())
+                if hits > best_hits:
+                    best, best_hits = row, hits
+            if best is not None:
+                return {"token_id": best["token_id"], "question": best["question"],
+                        "price": best["price"], "matched_by": f"keywords({best_hits})"}
+            m = eng.most_active_market()                   # nothing matched
+        if m is None:
+            return {"error": "no market found", "query": query}
+        return {"token_id": m.token_id, "question": m.question, "price": m.price,
+                "matched_by": "token_id" if q == m.token_id else "most_active"}
+
+    def analyze_market(market_ref):
+        """Run the whole Goal-1 framework on one market and return a structured result."""
+        ref = market_ref or {}
+        token = ref.get("token_id")
+        m = mcp_server._get_market(token) if token else None
+        if m is None:
+            return {"error": f"market not found: {ref}", "market_ref": ref}
+
+        state = eng.analyze(m)                              # L1 collect + L2 signal/decision/reflect (LLM)
+        sig = state.get("signal")
+        dec = state.get("trade_decision")
+        refl = state.get("reflection")
+        factors = ((state.get("raw", {}) or {}).get("features", {}) or {}).get("factors", {})
+
+        cat, yes = _resolved_yes(m.question)               # 回溯对比: backtest the signal on comparable history
+        backtest = _replay(yes, event=m.question) if yes else {
+            "n_markets": 0, "note": f"no resolved '{cat}' markets to backtest against"}
+
+        try:
+            similar = mcp_server.find_similar_markets(m.question, n=3)
+        except Exception:
+            similar = []
+
+        return {
+            "market": {"token_id": m.token_id, "question": m.question, "price": m.price,
+                       "category": cat, "days_to_expiry": round(m.days_to_expiry, 1),
+                       "liquidity": m.liquidity},
+            "explore": {"price_report": state.get("price_report"),
+                        "orderbook_report": state.get("orderbook_report"),
+                        "trades_flow_report": state.get("trades_flow_report")},
+            "microstructure": factors,
+            "reasoning": ({"p_true": sig.p_true, "direction": sig.direction,
+                           "conviction": sig.conviction, "rationale": sig.rationale}
+                          if sig is not None else {"note": "no signal (LLM unavailable)"}),
+            "backtest": backtest,
+            "similar_markets": similar,
+            "conclusion": ({"action": dec.action, "edge": round(dec.edge, 4),
+                            "p_calibrated": round(dec.p_true, 4),
+                            "annualized_edge": round(dec.annualized_edge, 4),
+                            "size_usdc": round(dec.size_usdc, 2), "reasons": dec.reasons,
+                            "risk_flags": (refl.risk_flags if refl is not None else [])}
+                           if dec is not None else {"note": "no decision"}),
+        }
 
     def _last_content(res):
         msgs = res.get("messages", []) if isinstance(res, dict) else []
@@ -135,6 +207,8 @@ def default_registry() -> list:
         scan_capability(scan),
         batch_collect_capability(batch_collect),
         batch_backtest_capability(batch_backtest),
+        resolve_market_capability(resolve),
+        analyze_market_capability(analyze_market),
         answer_capability(answer, stream_fn=answer_stream),
         domain_capability(domain_answer, stream_fn=domain_stream),
         strategy_capability(run_strategy),
