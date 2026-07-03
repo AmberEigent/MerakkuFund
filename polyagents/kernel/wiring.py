@@ -7,6 +7,8 @@ the production wiring). Needs network / ANTHROPIC_API_KEY at run time.
 """
 from __future__ import annotations
 
+import re
+
 from .capabilities import (analyze_market_capability, answer_capability,
                            backtest_capability, batch_backtest_capability,
                            batch_collect_capability, data_capability,
@@ -212,24 +214,30 @@ def default_registry() -> list:
             pass
         return terms
 
+    def _words(s):                                      # alpha words >2 chars; drops digits/years
+        return {w for w in re.findall(r"[a-z]+", str(s).lower()) if len(w) > 2}
+
     def discover(topic):
-        terms = _topic_terms(topic)
+        term_words = set()                              # word-overlap match is robust to phrasing
+        for t in _topic_terms(topic):                   # ("2026 world cup" still contributes world/cup)
+            term_words |= _words(t)
         rows = mcp_server.scan_markets(limit=40, min_volume_24h=5000.0)
         by_cond = {}                                    # dedup by market, keep the YES side
         for row in rows:
+            if (row.get("days_to_expiry") or 0) < 1:    # skip settling / same-day markets
+                continue
             cid = row.get("condition_id")
             if cid not in by_cond or row.get("outcome") == "YES":
                 by_cond[cid] = row
         scored = []
         for row in by_cond.values():
-            q = str(row.get("question", "")).lower()
-            hits = sum(1 for t in terms if t in q)
+            hits = len(term_words & _words(row.get("question", "")))
             if hits:
                 scored.append((hits, row))
         scored.sort(key=lambda t: (t[0], t[1].get("volume_24h", 0.0)), reverse=True)
         markets = [{**r, "relevance": h} for h, r in scored[:6]]
         return {"topic": topic, "count": len(markets), "markets": markets,
-                "terms": sorted(terms)}
+                "terms": sorted(term_words)}
 
     def recommend(candidates, top_n=3):
         cands = (candidates or {}).get("markets", [])[:top_n]
