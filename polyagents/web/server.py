@@ -313,10 +313,7 @@ def _object_store():
     global _OBJECT_STORE
     if _OBJECT_STORE is None:
         from polyagents.storage.objects_store import ObjectStore
-        db = DEFAULT_CONFIG.get("db_path")
-        path = (Path(db).with_name("objects.db") if db
-                else Path.home() / ".polyagents" / "objects.db")
-        _OBJECT_STORE = ObjectStore(path)
+        _OBJECT_STORE = ObjectStore()        # shared engine (POLYAGENTS_DATABASE_URL → Postgres in prod)
     return _OBJECT_STORE
 
 
@@ -324,10 +321,7 @@ def _audit():
     global _AUDIT_STORE
     if _AUDIT_STORE is None:
         from polyagents.storage.audit_store import AuditStore
-        db = DEFAULT_CONFIG.get("db_path")
-        path = (Path(db).with_name("audit.db") if db
-                else Path.home() / ".polyagents" / "audit.db")
-        _AUDIT_STORE = AuditStore(path)
+        _AUDIT_STORE = AuditStore()
     return _AUDIT_STORE
 
 
@@ -578,6 +572,42 @@ def _answer_text(f) -> str:
     return str(body)
 
 
+def _format_crypto_arb(a: dict, path: str) -> str:
+    """Render the crypto cross-market arbitrage scan (spot vs implied probability)."""
+    opps = a.get("opportunities") or []
+    barrier = a.get("barrier_markets") or []
+    def _px(v):                                          # decimals for sub-$10 assets (DOGE), else whole
+        return f"${v:,.4f}" if v < 10 else f"${v:,.0f}"
+    lines = [f"**跨市场套利扫描 · crypto 现货 vs 隐含概率** · {path}", ""]
+    if not opps and not barrier:
+        lines.append("未找到可解析的 crypto 阈值市场(需要类似 'Will BTC be above $X on …' 的市场)。")
+        return "\n".join(lines)
+    if opps:
+        b = a["best"]
+        tag = "市场**低估**(现货已支持,可考虑买 YES)" if b["gap"] > 0 else "市场**高估**(偏贵,可看 NO)"
+        lines.append(f"**最大错价(终端型 · 模型适用)**:{b['question']}  \n"
+                     f"→ {b['asset']} 现货 {_px(b['spot'])} vs 行权 {_px(b["strike"])} ({b['direction']}) · "
+                     f"{b['days']} 天 · 模型 p={b['p_model']} vs 市场价 {b['market_price']} · **gap={b['gap']:+}** → {tag}")
+        lines.append("\n| 终端型市场 | 现货 | 行权 | 模型p | 市场价 | gap |")
+        lines.append("|---|---|---|---|---|---|")
+        for o in opps:
+            lines.append(f"| {(o.get('question') or '')[:30]} | {_px(o['spot'])} | {_px(o['strike'])} | "
+                         f"{o['p_model']} | {o['market_price']} | {o['gap']:+} |")
+        lines.append("\n_gap = 模型概率 − 市场价;正=市场低估。仅终端型(到期是否高于/低于 X)才算 gap。_")
+    else:
+        lines.append("终端型市场(模型适用)里暂无可评分的错价。")
+    if barrier:
+        lines.append(f"\n**触碰型市场({a.get('n_barrier', len(barrier))} 个 · reach/dip/hit — "
+                     "终端模型不适用,仅列出不评 gap)**:")
+        lines.append("\n| 触碰型市场 | 现货 | 行权 | 市场价 |")
+        lines.append("|---|---|---|---|")
+        for o in barrier:
+            lines.append(f"| {(o.get('question') or '')[:30]} | {_px(o['spot'])} | {_px(o['strike'])} | {o['market_price']} |")
+        lines.append("\n_触碰型='期间内是否曾到过 X'(barrier),需要触碰概率模型,当前终端 lognormal 会系统性低估,故不计 gap。_")
+    lines.append("\n_信号非确定性:现货可能反转,注意点差与结算/预言机时点。_")
+    return "\n".join(lines)
+
+
 def _format_strategy_comparison(c: dict, path: str) -> str:
     """Render the multi-strategy backtest comparison over a domain's resolved markets."""
     strats = c.get("strategies") or []
@@ -651,6 +681,8 @@ def _kernel_summary(ctx) -> str:
         c = f["collections"]
         return (f"**kernel** {path}\n\n批量采集 · 市场数={c.get('n_markets')} · "
                 f"store={c.get('store_counts')}")
+    if "crypto_arb" in f:                                # cross-market crypto arbitrage scan
+        return _format_crypto_arb(f["crypto_arb"], path)
     if "strategy_comparison" in f:                       # multi-strategy backtest comparison
         return _format_strategy_comparison(f["strategy_comparison"], path)
     if "backtest_report" in f:
