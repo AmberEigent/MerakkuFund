@@ -46,7 +46,12 @@ def parse_crypto_market(question: str) -> dict | None:
     # everything else (reach/hit/above/over/exceed) is an upward threshold.
     down = re.search(r"\b(dip|drop|fall|below|under|less than|down to)\b|<", q)
     direction = "below" if down else "above"
-    return {"asset": asset, "strike": strike, "direction": direction}
+    # terminal ('be above/below X on/by <date>') vs barrier/touch ('reach/hit/dip/… X').
+    # The zero-drift terminal lognormal only models terminal markets; barrier markets
+    # (touch-any-time) need a barrier prob, so we don't score them.
+    barrier = re.search(r"\b(reach|reaches|hit|hits|dip|drop|fall|touch|touches|ever|cross|crosses)\b", q)
+    kind = "barrier" if barrier else "terminal"
+    return {"asset": asset, "strike": strike, "direction": direction, "kind": kind}
 
 
 def _chunk_text(content) -> str:
@@ -169,7 +174,7 @@ def default_registry() -> list:
             if m.condition_id not in by_cond or m.outcome == "YES":
                 by_cond[m.condition_id] = (m, parsed)
         spot: dict = {}
-        opps = []
+        opps, barrier = [], []                           # terminal (scored) vs touch (listed only)
         for m, parsed in by_cond.values():
             asset, K = parsed["asset"], parsed["strike"]
             if asset not in spot:
@@ -179,21 +184,25 @@ def default_registry() -> list:
             if not S or K <= 0:
                 continue
             T = max(float(m.days_to_expiry or 0.0), 0.0)
+            price = float(m.price or 0.0)
+            row = {"question": m.question, "token_id": m.token_id, "asset": asset,
+                   "strike": K, "direction": parsed["direction"], "spot": round(float(S), 2),
+                   "days": round(T, 1), "market_price": round(price, 3)}
+            if parsed.get("kind") == "barrier":          # touch event — terminal model invalid, don't score
+                barrier.append(row)
+                continue
             sig_h = _daily_vol(cx, asset) * math.sqrt(T) if T > 0 else 0.0
             if sig_h <= 0:
                 p_above = 1.0 if S > K else 0.0
             else:
                 p_above = _norm_cdf(math.log(S / K) / sig_h)   # zero-drift lognormal
             p_yes = min(0.99, max(0.01, p_above if parsed["direction"] == "above" else 1.0 - p_above))
-            price = float(m.price or 0.0)
-            opps.append({"question": m.question, "token_id": m.token_id,
-                         "asset": asset, "strike": K, "direction": parsed["direction"],
-                         "spot": round(float(S), 2), "days": round(T, 1), "p_model": round(p_yes, 3),
-                         "market_price": round(price, 3), "gap": round(p_yes - price, 3)})
+            opps.append({**row, "p_model": round(p_yes, 3), "gap": round(p_yes - price, 3)})
         opps.sort(key=lambda o: abs(o["gap"]), reverse=True)
         opps = opps[:cap]
         return {"query": query, "n": len(opps), "opportunities": opps,
-                "best": opps[0] if opps else None}
+                "best": opps[0] if opps else None,
+                "barrier_markets": barrier[:cap], "n_barrier": len(barrier)}
 
     def backtest_strategies(query):
         """Run every built-in strategy signal over the domain's resolved markets and

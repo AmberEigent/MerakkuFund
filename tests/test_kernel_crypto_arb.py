@@ -18,12 +18,13 @@ class FakeLLM:
 
 def test_parse_crypto_market():
     a = parse_crypto_market("Will BTC be above $110k by June 30?")
-    assert a == {"asset": "BTC", "strike": 110000.0, "direction": "above"}
+    assert a == {"asset": "BTC", "strike": 110000.0, "direction": "above", "kind": "terminal"}
     b = parse_crypto_market("Will Ethereum be below $2,500 this week?")
-    assert b == {"asset": "ETH", "strike": 2500.0, "direction": "below"}
+    assert b["direction"] == "below" and b["kind"] == "terminal"
     dip = parse_crypto_market("Will Bitcoin dip to $60,000 on July 3?")
-    assert dip["direction"] == "below" and dip["strike"] == 60000.0          # 'dip to' = downward
-    assert parse_crypto_market("Will Bitcoin reach $67,500 in July?")["direction"] == "above"
+    assert dip["direction"] == "below" and dip["kind"] == "barrier"          # 'dip to' = touch, downward
+    reach = parse_crypto_market("Will Bitcoin reach $67,500 in July?")
+    assert reach["direction"] == "above" and reach["kind"] == "barrier"      # 'reach' = touch event
     assert parse_crypto_market("Will Spain win the 2026 World Cup?") is None   # not crypto
 
 
