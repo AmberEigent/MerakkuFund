@@ -608,6 +608,31 @@ def _format_crypto_arb(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+def _format_promotion(v: dict, path: str) -> str:
+    """Render the Lab promotion-gate verdict: is any strategy paper-ready, and why not."""
+    strats = v.get("strategies") or []
+    lines = [f"**晋级门评估 · 够不够上 paper** · {path}", "",
+             f"**领域**:{v.get('domain')} · 已结算 {v.get('n')} 个"]
+    if not strats:
+        lines.append("\n" + (v.get("note") or "无可评估数据。"))
+        return "\n".join(lines)
+    ck = lambda b: "✅" if b else "❌"
+    lines.append("\n| 策略 | n | brier_delta | ECE | 样本足 | 跑赢市场 | 校准 | 无泄漏 | **paper-ready** |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
+    for s in strats:
+        g = s.get("gates", {})
+        lines.append(f"| {s['signal']} | {s.get('n')} | {s.get('brier_delta', '—')} | {s.get('ece', '—')} | "
+                     f"{ck(g.get('sample_adequate'))} | {ck(g.get('beats_market'))} | {ck(g.get('ece_pass'))} | "
+                     f"{ck(g.get('pit_clean'))} | {'✅' if s.get('paper_ready') else '❌'} |")
+    if v.get("paper_ready"):
+        lines.append("\n**结论**:有策略通过全部 4 道门 → **可以上 paper**。")
+    else:
+        lines.append("\n**结论**:**没有策略够上 paper** —— 全部卡在门上(通常是 *跑赢市场* 那道:没有 alpha)。")
+    lines.append("\n_晋级门(Lab 规则):样本足(n≥30)+ 跑赢市场(CI 不含 0)+ 校准 ECE≤0.05 + PIT 无泄漏,"
+                 "四门全过才 paper-ready。_")
+    return "\n".join(lines)
+
+
 def _format_strategy_comparison(c: dict, path: str) -> str:
     """Render the multi-strategy backtest comparison over a domain's resolved markets."""
     strats = c.get("strategies") or []
@@ -680,6 +705,8 @@ def _kernel_summary(ctx) -> str:
     # Final analytical deliverables win over intermediate steps (e.g. collections):
     if "crypto_arb" in f:                                # cross-market crypto arbitrage scan
         return _format_crypto_arb(f["crypto_arb"], path)
+    if "promotion_verdict" in f:                         # Lab promotion gates — paper-ready?
+        return _format_promotion(f["promotion_verdict"], path)
     if "strategy_comparison" in f:                       # multi-strategy backtest comparison
         return _format_strategy_comparison(f["strategy_comparison"], path)
     if "backtest_report" in f:
