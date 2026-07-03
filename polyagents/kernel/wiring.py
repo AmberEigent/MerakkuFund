@@ -130,12 +130,23 @@ def default_registry() -> list:
         return {"token_id": m.token_id, "question": m.question, "price": m.price,
                 "matched_by": "token_id" if q == m.token_id else "most_active"}
 
+    _analysis_cache: dict = {}                              # per-request memo, keyed by token_id
+
     def _analysis_core(m):
         """Shared L1+L2 analysis for one market — the scoring core reused by both
-        analyze_market (full framework) and recommend_markets (rank candidates)."""
+        analyze_market (full framework) and recommend_markets (rank candidates).
+
+        Memoized by token for this request, so a market recommended AND then
+        deep-analyzed is only run through the LLM once — the recommendation and the
+        framework then agree (same p_true / narrative) instead of two stochastic runs."""
+        cached = _analysis_cache.get(m.token_id)
+        if cached is not None:
+            return cached
         state = eng.analyze(m)                              # L1 collect + L2 signal/decision/reflect (LLM)
-        return {"state": state, "signal": state.get("signal"),
+        core = {"state": state, "signal": state.get("signal"),
                 "decision": state.get("trade_decision"), "reflection": state.get("reflection")}
+        _analysis_cache[m.token_id] = core
+        return core
 
     def analyze_market(market_ref):
         """Run the whole Goal-1 framework on one market and return a structured result."""
