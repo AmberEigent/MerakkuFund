@@ -77,6 +77,8 @@ def test_lab_ui_uses_lab_api_contract():
     assert "log_loss_model" in html
     assert "pit_warnings" in html
     assert "signal_model" in html or "model=" in html
+    assert "真实历史 collections" in html
+    assert "样本量不足" in html
     assert "fetch('/api/lab/hypotheses')" in html
     assert "'/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests'" in html
     assert "'/api/lab/reports/'+encodeURIComponent(r.report_id)" in html

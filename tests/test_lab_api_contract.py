@@ -49,6 +49,7 @@ def test_lab_http_create_backtest_report_flow(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("POLYAGENTS_LAB_DB", str(tmp_path / "lab.db"))
+    monkeypatch.setitem(server.DEFAULT_CONFIG, "db_path", str(tmp_path / "data.db"))
     service.default_repository.cache_clear()
     server.default_repository.cache_clear()
     client = TestClient(server.app)
@@ -98,6 +99,7 @@ def test_lab_http_create_backtest_report_flow(tmp_path, monkeypatch):
     assert body["time_window"]["end"] == "2026-06-01T00:00:00Z"
     assert body["backtest_config"]["max_markets"] == 100
     assert body["market_universe"]["source"] in {"collections", "fixture"}
+    assert body["data_quality"]["uses_fixture_data"] is True
     assert "data_quality" in body
     assert "scorecard" in body
     assert body["metrics"]["n"] == len(body["market_sample"])
