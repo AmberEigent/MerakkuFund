@@ -204,8 +204,13 @@ def default_registry() -> list:
     def discover(topic):
         terms = _topic_terms(topic)
         rows = mcp_server.scan_markets(limit=40, min_volume_24h=5000.0)
-        scored = []
+        by_cond = {}                                    # dedup by market, keep the YES side
         for row in rows:
+            cid = row.get("condition_id")
+            if cid not in by_cond or row.get("outcome") == "YES":
+                by_cond[cid] = row
+        scored = []
+        for row in by_cond.values():
             q = str(row.get("question", "")).lower()
             hits = sum(1 for t in terms if t in q)
             if hits:
@@ -228,18 +233,22 @@ def default_registry() -> list:
                 continue
             sig, dec = core["signal"], core["decision"]
             scored.append({
-                "token_id": m.token_id, "question": m.question, "price": round(m.price, 4),
+                "token_id": m.token_id, "question": m.question, "outcome": m.outcome,
+                "price": round(m.price, 4),
                 "p_true": round(sig.p_true, 3) if sig is not None else None,
                 "edge": round(dec.edge, 4) if dec is not None else None,
                 "action": dec.action if dec is not None else None,
                 "annualized_edge": round(dec.annualized_edge, 4) if dec is not None else None,
                 "rationale": sig.rationale if sig is not None else None,
             })
-        # rank: actionable (buy/sell) first, then by |edge|
+        # rank: actionable (buy/sell) first, then by SIGNED edge — a positive edge means
+        # underpriced (an attractive long); a negative edge means overpriced, not a pick.
         scored.sort(key=lambda s: (1 if s.get("action") in ("buy", "sell") else 0,
-                                   abs(s.get("edge") or 0.0)), reverse=True)
+                                   s.get("edge") or 0.0), reverse=True)
+        has_positive_edge = any((s.get("edge") or 0.0) > 0 for s in scored)
         return {"topic": (candidates or {}).get("topic"), "n_scored": len(scored),
-                "ranked": scored, "top_pick": scored[0] if scored else None}
+                "ranked": scored, "top_pick": scored[0] if scored else None,
+                "has_positive_edge": has_positive_edge}
 
     def _last_content(res):
         msgs = res.get("messages", []) if isinstance(res, dict) else []

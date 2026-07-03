@@ -582,23 +582,30 @@ def _format_recommendation(r: dict, path: str) -> str:
     """Render the Goal-2 result: topic → ranked candidates → recommended target."""
     ranked = r.get("ranked") or []
     top = r.get("top_pick")
+    def _side(s):                                       # show YES/NO so p_true isn't misread
+        o = s.get("outcome")
+        return f" [{o}]" if o else ""
     lines = [f"**标的推荐** · {path}", "", f"**主题**:{r.get('topic')}"]
     if not ranked:
         lines.append("\n未找到与该主题相关的活跃可交易标的。可换个更具体的主题(球队/资产/事件名),或直接指定一个市场做分析。")
         return "\n".join(lines)
+    if not r.get("has_positive_edge", True):            # honest: nothing underpriced
+        lines.append("\n⚠ 该主题下**没有被低估(正 edge)的标的**——候选当前都偏贵或接近合理定价。"
+                     "下面按相对机会排序,仅供观察,均未达下注门槛。")
     if top:
         act = (top.get("action") or "hold").upper()
-        lines.append(f"\n**推荐**:{top.get('question')}  \n"
+        lines.append(f"\n**推荐**:{top.get('question')}{_side(top)}  \n"
                      f"→ **{act}** · p_true={top.get('p_true')} · edge={top.get('edge')} · "
                      f"APY={top.get('annualized_edge')} · 价 {top.get('price')}")
         if top.get("rationale"):
             lines.append(f"　理由:{top['rationale']}")
     if len(ranked) > 1:
-        lines.append(f"\n**候选排序(共分析 {r.get('n_scored')} 个)**:")
+        lines.append(f"\n**候选排序(共分析 {r.get('n_scored')} 个 · 正 edge=被低估优先)**:")
         for i, s in enumerate(ranked, 1):
-            lines.append(f"{i}. {(s.get('question') or '')[:60]} — "
+            lines.append(f"{i}. {(s.get('question') or '')[:56]}{_side(s)} — "
                          f"{(s.get('action') or 'hold').upper()} · edge={s.get('edge')} · p_true={s.get('p_true')}")
-    lines.append("\n_注:edge<6% 门槛者结论为 HOLD;推荐=机会相对最好,不代表达到下注门槛。可对推荐标的再跑 analyze_market 看完整框架。_")
+    lines.append("\n_注:edge<6% 门槛者结论为 HOLD;正 edge=被低估(潜在做多),负 edge=偏贵。"
+                 "可对推荐标的再跑 analyze_market 看完整框架。_")
     return "\n".join(lines)
 
 
