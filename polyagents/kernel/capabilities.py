@@ -149,6 +149,23 @@ def promotion_gate_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"promotion_verdict"}), run, cost=4)
 
 
+def hunt_alpha_capability(fn: Callable) -> Capability:
+    """Top-level opportunity hunt — one request → scan the universe → consolidated board.
+
+    ``fn(query) -> dict`` runs the deterministic edge detectors across market types
+    (crypto spot-vs-implied mispricing + microstructure / smart-money flow) and returns
+    a ranked opportunity report. This is the 'batch-automate and give me results' entry
+    point: it orchestrates several scanners into one honest board."""
+    def run(ctx: Context) -> dict:
+        return {"alpha_hunt": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("hunt_alpha",
+                      "Hunt for trading opportunities ACROSS the market universe in one go: "
+                      "scan crypto spot-vs-implied mispricings and microstructure / smart-money "
+                      "flow signals, then rank them into one opportunity board. Use for 'find "
+                      "alpha', 'scan for opportunities', 'what's worth trading right now'.",
+                      frozenset({"question"}), frozenset({"alpha_hunt"}), run, cost=5)
+
+
 def crypto_arb_capability(fn: Callable) -> Capability:
     """Cross-market crypto arbitrage — the cross-market-arb strategy as a loop capability.
 

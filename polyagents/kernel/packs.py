@@ -8,8 +8,9 @@ capabilities, so the controller's menu stays tight as verticals grow.
 """
 from __future__ import annotations
 
-#: Always loaded — everyday research / analysis / recommendation / Q&A.
+#: Always loaded — everyday research / analysis / recommendation / Q&A / opportunity hunt.
 CORE: list[str] = [
+    "hunt_alpha",                                       # top-level opportunity scan
     "scan_markets", "resolve_market", "analyze_market",
     "discover_markets", "recommend_markets",
     "langgraph_answer", "domain_answer",

@@ -38,6 +38,8 @@ _SYS = (
     "→ promotion_gate.\n"
     "'Find mispriced crypto markets', crypto arbitrage, 'Will BTC be above $X', hunting "
     "trading opportunities in crypto → find_crypto_arb.\n"
+    "'Find alpha', 'scan for opportunities across markets', 'what's worth trading right now' "
+    "(broad, not one named market/topic) → hunt_alpha (the top-level opportunity scan).\n"
     "ANALYZING / evaluating a market — a named one OR 'the most active market' / 'a liquid "
     "one' / 'this market' — goes through resolve_market → analyze_market (resolve_market "
     "handles 'most active'). discover_markets is ONLY for a THEME / event / hot topic when "

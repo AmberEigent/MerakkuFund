@@ -626,6 +626,36 @@ def _answer_text(f) -> str:
     return str(body)
 
 
+def _format_alpha_hunt(a: dict, path: str) -> str:
+    """Render the top-level opportunity hunt: crypto mispricings + microstructure flow."""
+    crypto = a.get("crypto") or []
+    flow = a.get("flow") or []
+    lines = [f"**机会总扫描 · hunt_alpha** · {path}", "", f"_主题:{a.get('query')}_"]
+    lines.append(f"\n**① Crypto 现货 vs 隐含错价**({a.get('n_crypto', 0)} 个,终端型)")
+    if crypto:
+        lines.append("\n| 市场 | 现货 | 行权 | 模型p | 市场价 | gap |")
+        lines.append("|---|---|---|---|---|---|")
+        for o in crypto:
+            lines.append(f"| {(o.get('question') or '')[:28]} | {o.get('spot')} | {o.get('strike')} | "
+                         f"{o.get('p_model')} | {o.get('market_price')} | {o.get('gap'):+} |")
+    else:
+        lines.append("\n　(暂无可评分的终端型 crypto 错价)")
+    lines.append(f"\n**② 微结构 / 资金流信号**(扫了 {a.get('n_flow_scanned', 0)} 个活跃市场,取 top)")
+    if flow:
+        lines.append("\n| 市场 | flow | book | 量能x | 动量 | 点差bps | 倾向 | 分 |")
+        lines.append("|---|---|---|---|---|---|---|---|")
+        for s in flow:
+            lines.append(f"| {(s.get('question') or '')[:24]} | {s.get('flow_imbalance'):+} | "
+                         f"{s.get('book_pressure'):+} | {s.get('volume_spike')} | {s.get('price_momentum'):+} | "
+                         f"{s.get('spread_bps')} | {s.get('lean')} | {s.get('score')} |")
+    else:
+        lines.append("\n　(暂无明显资金流信号)")
+    lines.append("\n_① 终端型 crypto:模型概率 vs 市场价,gap 越负=市场越高估上行。_")
+    lines.append("_② 资金流:强单边 flow/book 且价格未跟上=潜在 edge;分越高越值得深挖。点差>300bps 视为难交易(降权)。_")
+    lines.append("_均为**信号非确定性**。想深挖某个 → 对它跑 analyze_market;想验证策略 → backtest_strategies / promotion_gate。_")
+    return "\n".join(lines)
+
+
 def _format_crypto_arb(a: dict, path: str) -> str:
     """Render the crypto cross-market arbitrage scan (spot vs implied probability)."""
     opps = a.get("opportunities") or []
@@ -757,6 +787,8 @@ def _kernel_summary(ctx) -> str:
     if "market_analysis" in f:                          # Goal-1 framework IS the grounded answer
         return _format_market_analysis(f["market_analysis"], path)  # no free-text append (avoids hallucinated punditry)
     # Final analytical deliverables win over intermediate steps (e.g. collections):
+    if "alpha_hunt" in f:                                # top-level opportunity hunt
+        return _format_alpha_hunt(f["alpha_hunt"], path)
     if "crypto_arb" in f:                                # cross-market crypto arbitrage scan
         return _format_crypto_arb(f["crypto_arb"], path)
     if "promotion_verdict" in f:                         # Lab promotion gates — paper-ready?
