@@ -15,8 +15,9 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            batch_backtest_capability, batch_collect_capability,
                            crypto_arb_capability, data_capability,
                            discover_markets_capability, domain_capability,
-                           hunt_alpha_capability, microstructure_scan_capability,
-                           news_sentiment_capability,
+                           evaluate_skill_capability, hunt_alpha_capability,
+                           microstructure_scan_capability, news_sentiment_capability,
+                           portfolio_review_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
                            strategy_capability)
@@ -251,6 +252,12 @@ def default_registry() -> list:
                 "flow": flow[:5], "n_flow_scanned": len(flow)}
 
     # ----- vertical pack capabilities: news-events / microstructure ----------
+
+    def evaluate_skill(query):
+        return {"report": mcp_server.evaluation_report()}
+
+    def portfolio_review(query):
+        return {"portfolio": mcp_server.portfolio_status(), "pnl": mcp_server.pnl_report()}
 
     def news_sentiment(query):
         nc = eng.news_client
@@ -534,6 +541,8 @@ def default_registry() -> list:
         promotion_gate_capability(promotion_gate),
         crypto_arb_capability(find_crypto_arb),
         hunt_alpha_capability(hunt_alpha),
+        evaluate_skill_capability(evaluate_skill),
+        portfolio_review_capability(portfolio_review),
         news_sentiment_capability(news_sentiment),
         microstructure_scan_capability(microstructure_scan),
         resolve_market_capability(resolve),

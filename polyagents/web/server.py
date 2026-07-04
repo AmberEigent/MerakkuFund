@@ -626,6 +626,29 @@ def _answer_text(f) -> str:
     return str(body)
 
 
+def _format_skill_report(a: dict, path: str) -> str:
+    """Render the calibration / skill report (does p_cal beat market)."""
+    return f"**技能评估 · evaluate_skill** · {path}\n\n```\n{a.get('report', '(无数据)')}\n```"
+
+
+def _format_portfolio(a: dict, path: str) -> str:
+    """Render the paper portfolio + P&L."""
+    p = a.get("portfolio", {}) or {}
+    pos = p.get("open_positions") or []
+    lines = [f"**纸面组合 & P&L · portfolio_review** · {path}", "",
+             f"现金 ${p.get('cash')} · 敞口 ${p.get('exposure')} · 已实现 P&L ${p.get('realized_pnl')} · "
+             f"持仓 {len(pos)} 个"]
+    if pos:
+        lines.append("\n| 市场 | 份额 | 均价 |")
+        lines.append("|---|---|---|")
+        for x in pos:
+            lines.append(f"| {(x.get('market') or '')[:40]} | {x.get('shares')} | {x.get('avg_price')} |")
+    else:
+        lines.append("\n_当前无持仓(paper)。_")
+    lines.append(f"\n**P&L / 归因**\n```\n{a.get('pnl', '(无交易记录)')}\n```")
+    return "\n".join(lines)
+
+
 def _format_news(a: dict, path: str) -> str:
     """Render the news + sentiment signal for a market/topic."""
     lines = [f"**新闻 / 事件情绪 · news_sentiment** · {path}", "", f"_主题:{a.get('query')}_"]
@@ -824,6 +847,10 @@ def _kernel_summary(ctx) -> str:
     # Final analytical deliverables win over intermediate steps (e.g. collections):
     if "alpha_hunt" in f:                                # top-level opportunity hunt
         return _format_alpha_hunt(f["alpha_hunt"], path)
+    if "skill_report" in f:                              # calibration / skill report
+        return _format_skill_report(f["skill_report"], path)
+    if "portfolio_review" in f:                          # paper portfolio + P&L
+        return _format_portfolio(f["portfolio_review"], path)
     if "microstructure" in f:                            # order-flow scan
         return _format_microstructure(f["microstructure"], path)
     if "news_sentiment" in f:                            # news + sentiment signal

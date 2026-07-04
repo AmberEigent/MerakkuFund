@@ -42,6 +42,8 @@ _SYS = (
     "(broad, not one named market/topic) → hunt_alpha (the top-level opportunity scan).\n"
     "'Scan microstructure / order flow', 'where is the smart money' → microstructure_scan. "
     "'News / sentiment / headlines on X' → news_sentiment.\n"
+    "'Do we have skill / are we beating the market / calibration report' → evaluate_skill. "
+    "'Show my portfolio / P&L / positions / how are my trades doing' → portfolio_review.\n"
     "When a specialized scan (hunt_alpha / find_crypto_arb / microstructure_scan / "
     "news_sentiment) fits the request, call it and answer from its result — do NOT also call "
     "domain_answer for the same thing.\n"

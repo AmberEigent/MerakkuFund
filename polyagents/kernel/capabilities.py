@@ -149,6 +149,33 @@ def promotion_gate_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"promotion_verdict"}), run, cost=4)
 
 
+def evaluate_skill_capability(fn: Callable) -> Capability:
+    """Calibration / skill report — does our p_cal actually beat the market baseline?
+
+    ``fn(query) -> dict`` runs the evaluation over the decision log (Brier / log-loss /
+    ECE vs the market price, by category). If we don't beat the market, the edge is
+    noise — this is the honest 'do we have any skill' check."""
+    def run(ctx: Context) -> dict:
+        return {"skill_report": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("evaluate_skill",
+                      "Report whether our forecasts beat the market baseline over time "
+                      "(Brier / calibration / ECE, by category) — 'do we actually have skill / "
+                      "alpha', 'calibration report', 'are we beating the market'.",
+                      frozenset({"question"}), frozenset({"skill_report"}), run, cost=2)
+
+
+def portfolio_review_capability(fn: Callable) -> Capability:
+    """Paper portfolio + P&L review. ``fn(query) -> dict`` returns cash / exposure /
+    positions plus the realised-P&L / hit-rate / attribution report."""
+    def run(ctx: Context) -> dict:
+        return {"portfolio_review": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("portfolio_review",
+                      "Show the paper portfolio and P&L: cash, open positions, exposure, "
+                      "realised P&L, hit rate and attribution. Use for 'show my portfolio / "
+                      "P&L / positions / how are my trades doing'.",
+                      frozenset({"question"}), frozenset({"portfolio_review"}), run, cost=1)
+
+
 def news_sentiment_capability(fn: Callable) -> Capability:
     """News + sentiment for a market/topic — an event-driven signal (pack: news-events).
 
