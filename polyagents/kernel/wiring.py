@@ -93,7 +93,8 @@ def default_registry() -> list:
     keyword category, then replay a deterministic backtest over them."""
     from polyagents import mcp_server
     from polyagents.evaluation.evaluate import categorize
-    from polyagents.lab.backtest import BacktestRunner, momentum_signal, naive_signal
+    from polyagents.lab.backtest import BacktestRunner
+    from polyagents.strategies import SIGNALS
 
     eng = mcp_server.engine()
 
@@ -218,7 +219,7 @@ def default_registry() -> list:
             return {"domain": cat, "n": 0, "strategies": [], "paper_ready": False,
                     "note": "no resolved markets to evaluate"}
         strategies = []
-        for name, fn in (("naive", naive_signal), ("momentum", momentum_signal)):
+        for name, fn in SIGNALS.items():
             recs = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn).replay(
                 markets=yes)["records"]
             if not recs:
@@ -250,7 +251,7 @@ def default_registry() -> list:
             return {"domain": cat, "n_markets": 0, "strategies": [], "best": None,
                     "note": "no resolved markets to backtest"}
         strategies = []
-        for name, fn in (("naive", naive_signal), ("momentum", momentum_signal)):
+        for name, fn in SIGNALS.items():
             out = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn).replay(
                 category=None, markets=yes)
             s = out["summary"]
