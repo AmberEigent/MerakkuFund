@@ -132,6 +132,23 @@ def batch_backtest_capability(backtest_fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"backtest_report"}), run, cost=4)
 
 
+def promotion_gate_capability(fn: Callable) -> Capability:
+    """Apply Lab's promotion gates to a domain's strategies — is any PAPER-READY?
+
+    ``fn(query) -> dict`` backtests the strategies over the domain's resolved markets
+    and runs the Lab gates (sample adequate + beats market + ECE calibration + PIT
+    clean) on each, reporting which (if any) passes. This is the loop→Lab bridge:
+    it reuses Lab's ``promotion_gates`` to turn a backtest into a go/no-go verdict."""
+    def run(ctx: Context) -> dict:
+        return {"promotion_verdict": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("promotion_gate",
+                      "Check whether a strategy / domain is PAPER-READY using Lab's "
+                      "promotion gates (enough samples + beats market + calibration/ECE + "
+                      "point-in-time clean). Use for 'is this good enough to go to paper / "
+                      "promote', 'which gate does it fail'.",
+                      frozenset({"question"}), frozenset({"promotion_verdict"}), run, cost=4)
+
+
 def crypto_arb_capability(fn: Callable) -> Capability:
     """Cross-market crypto arbitrage — the cross-market-arb strategy as a loop capability.
 

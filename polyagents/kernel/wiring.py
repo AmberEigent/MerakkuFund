@@ -15,8 +15,9 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            batch_backtest_capability, batch_collect_capability,
                            crypto_arb_capability, data_capability,
                            discover_markets_capability, domain_capability,
-                           recommend_markets_capability, resolve_market_capability,
-                           scan_capability, strategy_capability)
+                           promotion_gate_capability, recommend_markets_capability,
+                           resolve_market_capability, scan_capability,
+                           strategy_capability)
 
 
 def _norm_cdf(x: float) -> float:
@@ -203,6 +204,39 @@ def default_registry() -> list:
         return {"query": query, "n": len(opps), "opportunities": opps,
                 "best": opps[0] if opps else None,
                 "barrier_markets": barrier[:cap], "n_barrier": len(barrier)}
+
+    def promotion_gate(query):
+        """loop→Lab bridge: backtest each strategy over the domain, then run Lab's
+        promotion gates (sample / beats-market / ECE / PIT) → is any PAPER-READY?"""
+        from polyagents.evaluation.report import build_evaluation_summary, promotion_gates
+        cat, yes = _resolved_yes(query)
+        if not yes:                                     # domain empty → all resolved
+            raw = eng.client.list_resolved_markets(limit=80)
+            yes = [m for m in eng.client.to_markets(raw) if m.outcome == "YES"]
+            cat = f"{cat}→all"
+        if not yes:
+            return {"domain": cat, "n": 0, "strategies": [], "paper_ready": False,
+                    "note": "no resolved markets to evaluate"}
+        strategies = []
+        for name, fn in (("naive", naive_signal), ("momentum", momentum_signal)):
+            recs = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn).replay(
+                markets=yes)["records"]
+            if not recs:
+                strategies.append({"signal": name, "n": 0, "gates": {}, "paper_ready": False})
+                continue
+            summary = build_evaluation_summary(
+                p_cal=[r["p_true"] for r in recs],
+                p_market=[r["market_price"] for r in recs],
+                outcomes=[1.0 if r["won"] else 0.0 for r in recs],
+                pit_clean=True)                          # replay is strictly point-in-time
+            gates = promotion_gates(summary)
+            strategies.append({"signal": name, "n": summary.n,
+                               "brier_delta": round(summary.brier_delta, 4),
+                               "ece": round(summary.ece, 4),
+                               "gates": gates, "paper_ready": gates["paper_ready"]})
+        return {"domain": cat, "n": max((s["n"] for s in strategies), default=0),
+                "strategies": strategies,
+                "paper_ready": any(s.get("paper_ready") for s in strategies)}
 
     def backtest_strategies(query):
         """Run every built-in strategy signal over the domain's resolved markets and
@@ -426,6 +460,7 @@ def default_registry() -> list:
         batch_collect_capability(batch_collect),
         batch_backtest_capability(batch_backtest),
         backtest_strategies_capability(backtest_strategies),
+        promotion_gate_capability(promotion_gate),
         crypto_arb_capability(find_crypto_arb),
         resolve_market_capability(resolve),
         analyze_market_capability(analyze_market),
