@@ -626,6 +626,41 @@ def _answer_text(f) -> str:
     return str(body)
 
 
+def _format_news(a: dict, path: str) -> str:
+    """Render the news + sentiment signal for a market/topic."""
+    lines = [f"**新闻 / 事件情绪 · news_sentiment** · {path}", "", f"_主题:{a.get('query')}_"]
+    if not a.get("enabled"):
+        lines.append("\n" + (a.get("note") or "新闻检索未启用。"))
+        return "\n".join(lines)
+    items = a.get("items") or []
+    lines.append(f"\n**综合情绪**:{a.get('signal')}(均分 {a.get('mean_sentiment')},共 {a.get('n_items')} 条)")
+    if items:
+        lines.append("\n| 情绪 | 标题 |")
+        lines.append("|---|---|")
+        for it in items:
+            lines.append(f"| {it.get('sentiment'):+} | [{(it.get('title') or '')[:60]}]({it.get('url')}) |")
+    lines.append("\n_情绪分 ∈ [−1,1],词典打分;>0.1 偏多、<−0.1 偏空。事件驱动信号,非确定性。_")
+    return "\n".join(lines)
+
+
+def _format_microstructure(a: dict, path: str) -> str:
+    """Render the microstructure / flow scan across markets."""
+    mk = a.get("markets") or []
+    lines = [f"**微结构 / 资金流扫描 · microstructure_scan** · {path}", "",
+             f"_领域:{a.get('category')} · 扫了 {a.get('n_scanned')} 个市场,取 top_"]
+    if not mk:
+        lines.append("\n未扫到可用市场。")
+        return "\n".join(lines)
+    lines.append("\n| 市场 | flow | book | micro-mid | 量能x | 动量 | 点差bps | 倾向 | 分 |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
+    for s in mk:
+        lines.append(f"| {(s.get('question') or '')[:22]} | {s.get('flow_imbalance'):+} | "
+                     f"{s.get('book_pressure'):+} | {s.get('micro_vs_mid'):+} | {s.get('volume_spike')} | "
+                     f"{s.get('price_momentum'):+} | {s.get('spread_bps')} | {s.get('lean')} | {s.get('score')} |")
+    lines.append("\n_分越高=资金流/盘口越单边且价格越没跟上(潜在 edge)。点差>300bps 视为难交易(降权)。想深挖某个 → analyze_market。_")
+    return "\n".join(lines)
+
+
 def _format_alpha_hunt(a: dict, path: str) -> str:
     """Render the top-level opportunity hunt: crypto mispricings + microstructure flow."""
     crypto = a.get("crypto") or []
@@ -789,6 +824,10 @@ def _kernel_summary(ctx) -> str:
     # Final analytical deliverables win over intermediate steps (e.g. collections):
     if "alpha_hunt" in f:                                # top-level opportunity hunt
         return _format_alpha_hunt(f["alpha_hunt"], path)
+    if "microstructure" in f:                            # order-flow scan
+        return _format_microstructure(f["microstructure"], path)
+    if "news_sentiment" in f:                            # news + sentiment signal
+        return _format_news(f["news_sentiment"], path)
     if "crypto_arb" in f:                                # cross-market crypto arbitrage scan
         return _format_crypto_arb(f["crypto_arb"], path)
     if "promotion_verdict" in f:                         # Lab promotion gates — paper-ready?

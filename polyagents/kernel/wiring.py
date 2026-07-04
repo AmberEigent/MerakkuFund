@@ -15,7 +15,8 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            batch_backtest_capability, batch_collect_capability,
                            crypto_arb_capability, data_capability,
                            discover_markets_capability, domain_capability,
-                           hunt_alpha_capability,
+                           hunt_alpha_capability, microstructure_scan_capability,
+                           news_sentiment_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
                            strategy_capability)
@@ -207,13 +208,29 @@ def default_registry() -> list:
                 "best": opps[0] if opps else None,
                 "barrier_markets": barrier[:cap], "n_barrier": len(barrier)}
 
-    def hunt_alpha(query, n_micro=6):
-        """Top-level opportunity hunt: crypto spot-vs-implied mispricings + microstructure
-        smart-money flow, consolidated and ranked. Deterministic (no LLM), honest."""
-        arb = find_crypto_arb(query)                    # reuse the crypto edge detector
-        crypto = (arb.get("opportunities") or [])[:5]
-        flow = []                                        # microstructure / flow scan
-        for row in mcp_server.scan_markets(limit=n_micro, min_volume_24h=20000.0):
+    def _flow_signal(m, factors):
+        """Score one market's microstructure/flow: strong one-sided flow+book with an
+        un-moved price = potential edge; wide spread = penalised (untradeable)."""
+        fi = float(factors.get("flow_imbalance", 0.0))      # buy vs sell flow
+        bp = float(factors.get("book_pressure", 0.0))       # bid vs ask depth
+        vs = float(factors.get("volume_spike_ratio", 0.0))  # unusual activity
+        pm = float(factors.get("price_momentum", 0.0))      # has price moved yet
+        spread = float(factors.get("spread_bps", 0.0))
+        mvm = float(factors.get("micro_vs_mid", 0.0))
+        conviction = 0.5 * abs(fi) + 0.3 * abs(bp) + 0.2 * min(vs / 3.0, 1.0)
+        unpriced = 1.0 + max(0.0, 0.15 - abs(pm))           # flow strong but price flat = edge
+        tradeable = spread < 300.0
+        return {"question": m.question, "token_id": m.token_id,
+                "flow_imbalance": round(fi, 3), "book_pressure": round(bp, 3),
+                "volume_spike": round(vs, 2), "price_momentum": round(pm, 3),
+                "spread_bps": round(spread, 0), "micro_vs_mid": round(mvm, 4),
+                "score": round(conviction * unpriced * (1.0 if tradeable else 0.3), 3),
+                "tradeable": tradeable,
+                "lean": "YES(资金买盘占优)" if (fi + bp) > 0 else "NO/谨慎(卖盘占优)"}
+
+    def _scan_flow(rows, cap):
+        out = []
+        for row in rows[:cap]:
             m = mcp_server._get_market(row.get("token_id", ""))
             if m is None:
                 continue
@@ -221,26 +238,43 @@ def default_registry() -> list:
                 factors = ((eng.collect(m).get("raw", {}) or {}).get("features", {}) or {}).get("factors", {})
             except Exception:
                 continue
-            fi = float(factors.get("flow_imbalance", 0.0))      # buy vs sell flow
-            bp = float(factors.get("book_pressure", 0.0))       # bid vs ask depth
-            vs = float(factors.get("volume_spike_ratio", 0.0))  # unusual activity
-            pm = float(factors.get("price_momentum", 0.0))      # has price moved yet
-            spread = float(factors.get("spread_bps", 0.0))
-            conviction = 0.5 * abs(fi) + 0.3 * abs(bp) + 0.2 * min(vs / 3.0, 1.0)
-            unpriced = 1.0 + max(0.0, 0.15 - abs(pm))           # flow strong but price flat = edge
-            tradeable = spread < 300.0
-            score = conviction * unpriced * (1.0 if tradeable else 0.3)
-            flow.append({
-                "question": m.question, "token_id": m.token_id,
-                "flow_imbalance": round(fi, 3), "book_pressure": round(bp, 3),
-                "volume_spike": round(vs, 2), "price_momentum": round(pm, 3),
-                "spread_bps": round(spread, 0), "score": round(score, 3),
-                "tradeable": tradeable,
-                "lean": "YES(资金买盘占优)" if (fi + bp) > 0 else "NO/谨慎(卖盘占优)",
-            })
-        flow.sort(key=lambda x: x["score"], reverse=True)
+            out.append(_flow_signal(m, factors))
+        out.sort(key=lambda x: x["score"], reverse=True)
+        return out
+
+    def hunt_alpha(query, n_micro=6):
+        """Top-level opportunity hunt: crypto spot-vs-implied mispricings + microstructure
+        smart-money flow, consolidated and ranked. Deterministic (no LLM), honest."""
+        crypto = (find_crypto_arb(query).get("opportunities") or [])[:5]   # reuse crypto detector
+        flow = _scan_flow(mcp_server.scan_markets(limit=n_micro, min_volume_24h=20000.0), n_micro)
         return {"query": query, "crypto": crypto, "n_crypto": len(crypto),
                 "flow": flow[:5], "n_flow_scanned": len(flow)}
+
+    # ----- vertical pack capabilities: news-events / microstructure ----------
+
+    def news_sentiment(query):
+        nc = eng.news_client
+        if not getattr(nc, "enabled", False):
+            return {"query": query, "enabled": False,
+                    "note": "新闻/情绪需要 TAVILY_API_KEY(.env),当前未配置"}
+        items = nc.search(query or "", max_results=6)
+        scored = []
+        for it in items:
+            s = eng.scorer.score(f"{getattr(it, 'title', '')} {getattr(it, 'snippet', '')}")
+            scored.append({"title": getattr(it, "title", ""), "url": getattr(it, "url", ""),
+                           "sentiment": round(float(s), 3)})
+        mean = round(sum(x["sentiment"] for x in scored) / len(scored), 3) if scored else 0.0
+        signal = "偏多" if mean > 0.1 else ("偏空" if mean < -0.1 else "中性")
+        return {"query": query, "enabled": True, "n_items": len(scored),
+                "mean_sentiment": mean, "signal": signal, "items": scored}
+
+    def microstructure_scan(query, n=10):
+        cat = categorize(query or "")
+        rows = mcp_server.scan_markets(limit=30, min_volume_24h=10000.0)
+        if cat != "other":                              # narrow to the request's domain if any
+            rows = [r for r in rows if categorize(r.get("question", "")) == cat] or rows
+        ranked = _scan_flow(rows, n)
+        return {"query": query, "category": cat, "n_scanned": len(ranked), "markets": ranked[:8]}
 
     def promotion_gate(query):
         """loop→Lab bridge: backtest each strategy over the domain, then run Lab's
@@ -500,6 +534,8 @@ def default_registry() -> list:
         promotion_gate_capability(promotion_gate),
         crypto_arb_capability(find_crypto_arb),
         hunt_alpha_capability(hunt_alpha),
+        news_sentiment_capability(news_sentiment),
+        microstructure_scan_capability(microstructure_scan),
         resolve_market_capability(resolve),
         analyze_market_capability(analyze_market),
         discover_markets_capability(discover),

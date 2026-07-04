@@ -29,6 +29,16 @@ PACKS: dict[str, dict] = {
         "description": "用交易所现货 + 波动率找 Polymarket crypto 市场的错价机会。",
         "capabilities": ["find_crypto_arb"],
     },
+    "microstructure": {
+        "name": "微结构 / 资金流扫描",
+        "description": "跨市场扫订单簿微结构 + 交易流,找'资金领先、价格滞后'的潜在 edge。",
+        "capabilities": ["microstructure_scan"],
+    },
+    "news-events": {
+        "name": "新闻 / 事件情绪",
+        "description": "拉某市场/主题的新闻并打情绪分,事件驱动信号(需 TAVILY_API_KEY)。",
+        "capabilities": ["news_sentiment"],
+    },
     "strategy-supervisor": {
         "name": "多智能体策略",
         "description": "data→signal→risk 监督者一条龙,给一个市场出决策。",

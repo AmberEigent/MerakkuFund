@@ -149,6 +149,36 @@ def promotion_gate_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"promotion_verdict"}), run, cost=4)
 
 
+def news_sentiment_capability(fn: Callable) -> Capability:
+    """News + sentiment for a market/topic — an event-driven signal (pack: news-events).
+
+    ``fn(query) -> dict`` searches recent news for the query and scores each item's
+    sentiment, aggregating a bullish/bearish read. Needs TAVILY_API_KEY; degrades
+    gracefully when unset."""
+    def run(ctx: Context) -> dict:
+        return {"news_sentiment": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("news_sentiment",
+                      "Pull recent NEWS for a market/topic and score its sentiment "
+                      "(bullish/bearish) — an event-driven signal. Use for 'what's the news / "
+                      "sentiment on X', 'any headlines moving this market'.",
+                      frozenset({"question"}), frozenset({"news_sentiment"}), run, cost=3)
+
+
+def microstructure_scan_capability(fn: Callable) -> Capability:
+    """Scan live order-book microstructure / smart-money flow across markets (pack:
+    microstructure). ``fn(query) -> dict`` collects L1 microstructure for a batch of
+    markets and ranks them by flow/book conviction vs a lagging price — the deep,
+    dedicated version of hunt_alpha's flow section."""
+    def run(ctx: Context) -> dict:
+        return {"microstructure": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("microstructure_scan",
+                      "Scan order-book microstructure and trade-flow across a BATCH of markets "
+                      "(optionally a category) — micro-price, depth imbalance, book pressure, "
+                      "flow imbalance — and rank where smart money leads a lagging price. Use "
+                      "for 'scan microstructure / order flow', 'where is the smart money'.",
+                      frozenset({"question"}), frozenset({"microstructure"}), run, cost=4)
+
+
 def hunt_alpha_capability(fn: Callable) -> Capability:
     """Top-level opportunity hunt — one request → scan the universe → consolidated board.
 
