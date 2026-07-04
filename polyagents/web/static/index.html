@@ -361,6 +361,12 @@
   .lib-name{font-weight:500;font-size:12.5px;font-family:"DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
   .lib-io{color:var(--mute);font-size:10px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
   .lib-desc{color:var(--mute);font-size:12px;margin-top:5px;line-height:1.42}
+  .lib-meta{color:var(--mute);font-size:10.5px;margin-top:6px;font-family:"DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.8}
+  .lib-name{flex-wrap:wrap;gap:6px}
+  .lib-badge{font-size:9.5px;font-weight:500;border-radius:var(--radius-sm);padding:1px 6px;border:1px solid var(--hairline);color:var(--mute);white-space:nowrap}
+  .lib-badge.auto{color:var(--body-strong);border-color:var(--body)}
+  .lib-badge.select{color:var(--accent2,#7aa2f7);border-color:#2c4a7a}
+  .lib-badge.kind{opacity:.85}
   .live-gate{border:1px solid var(--line);background:var(--panel2);border-radius:12px;overflow:hidden;max-width:520px}
   .lg-row{display:flex;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--line);font-size:13px}
   .lg-row:last-child{border-bottom:0} .lg-row span:first-child{color:var(--muted)}
@@ -407,7 +413,7 @@
   #plusMenu{left:0;bottom:58px} #modeMenu{left:50px;bottom:58px;min-width:230px} #modelMenu{left:150px;bottom:58px;min-width:240px}
   .route-badge{display:inline-block;margin-bottom:5px;font:11px ui-monospace,monospace;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 8px}
   .route-badge.general{color:var(--accent2);border-color:#2c4a7a}
-  #skillsFly,#packsFly{left:222px;bottom:58px;min-width:300px;max-height:300px;overflow-y:auto}
+  #skillsFly{left:222px;bottom:58px;min-width:300px;max-height:300px;overflow-y:auto}
   .cmi-sub{color:var(--mute);font-size:10px;margin-left:auto;padding-right:4px}
   .cmi{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;width:100%;text-align:left;font-size:13px;color:var(--text)}
   .cmi:hover{background:var(--panel2)} .cmi.disabled{opacity:.5;cursor:default} .cmi.disabled:hover{background:transparent}
@@ -613,10 +619,8 @@
 
           <div class="cpop" id="plusMenu">
             <button class="cmi" onclick="closeCMenus();document.getElementById('fileInput').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3v5h5M14 3l5 5v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>Upload files</button>
-            <button class="cmi" onmouseenter="openPacksFly()" onclick="openPacksFly()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Packs<small class="cmi-sub">垂直能力包(Kernel)</small><span class="cchev">›</span></button>
-            <button class="cmi" onmouseenter="openSkillsFly()" onclick="openSkillsFly()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4M12 2a7 7 0 0 0-4 12c.6.5 1 1.2 1 2h6c0-.8.4-1.5 1-2a7 7 0 0 0-4-12z"/></svg>Skills<small class="cmi-sub">SKILL.md(Domain)</small><span class="cchev">›</span></button>
+            <button class="cmi" onmouseenter="openSkillsFly()" onclick="openSkillsFly()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4M12 2a7 7 0 0 0-4 12c.6.5 1 1.2 1 2h6c0-.8.4-1.5 1-2a7 7 0 0 0-4-12z"/></svg>Skills<small class="cmi-sub">垂直包 + 工作流,选中加载</small><span class="cchev">›</span></button>
           </div>
-          <div class="cpop" id="packsFly"></div>
           <div class="cpop" id="skillsFly"></div>
           <div class="cpop" id="modeMenu">
             <button class="cmrow" onclick="pickMode('kernel','Kernel',this)">Kernel<small>目标驱动·内核总循环(自动识别→选能力→动手)</small><span class="ctick">✓</span></button>
@@ -853,42 +857,40 @@ function toggleCMenu(e, id){
   closeCMenus();
   if(!wasOpen) el.classList.add('open');
 }
+// ---- Unified Skills selector: one list of the loading=select skills ----
+//   kind=pack     -> toggles selectedPacks (kernel loads that vertical pack)
+//   kind=workflow -> toggles selected      (SKILL.md prompt, Domain mode)
+let allLibrary = [];                     // unified manifest from /api/library
+let selectedPacks = new Set();           // empty = load all packs (default); else just these
+async function loadLibraryItems(){
+  try{ allLibrary = (await (await fetch('/api/library')).json()).skills || []; }catch(e){ allLibrary = []; }
+}
+function _isOn(it){ return it.kind==='pack' ? selectedPacks.has(it.id) : selected.has(it.id); }
 function openSkillsFly(){
   const fly = document.getElementById('skillsFly');
-  fly.innerHTML = allSkills.length ? allSkills.map(s =>
-    `<div class="cfly-row ${selected.has(s.id)?'on':''}" onclick="toggleSkillFromPop(event,'${esc(s.id)}')">
+  const sel = allLibrary.filter(s => s.loading==='select');
+  const tag = k => k==='pack' ? '<span class="lib-badge kind">垂直包</span>' : '<span class="lib-badge kind">工作流</span>';
+  fly.innerHTML = sel.length ? (
+    `<div class="pd" style="padding:6px 12px 2px">选中才加载;垂直包→进 Kernel loop,工作流→Domain 提示</div>` +
+    sel.map(s =>
+    `<div class="cfly-row ${_isOn(s)?'on':''}" onclick="toggleLibItem(event,'${esc(s.id)}','${s.kind}')">
        <div class="pc">✓</div>
-       <div><div class="pn">${esc(s.name||s.id)}</div><div class="pd">${esc(s.description||'')}</div></div>
-     </div>`).join('') : '<div class="hist" style="padding:10px">No skills found.</div>';
-  fly.classList.add('open');                  // keep the + menu open beside it
+       <div><div class="pn">${esc(s.name)} ${tag(s.kind)}</div><div class="pd">${esc(s.description||'')}</div></div>
+     </div>`).join('')) : '<div class="hist" style="padding:10px">No selectable skills.</div>';
+  fly.classList.add('open');
 }
-function toggleSkillFromPop(e, id){
+function toggleLibItem(e, id, kind){
+  e.stopPropagation();
+  const set = kind==='pack' ? selectedPacks : selected;
+  if(set.has(id)) set.delete(id); else set.add(id);
+  e.currentTarget.classList.toggle('on');
+  if(kind!=='pack'){ renderSkillsSummary(); renderSkillGrid(); }
+}
+function toggleSkillFromPop(e, id){       // still used by the Skills view grid
   e.stopPropagation();
   if(selected.has(id)) selected.delete(id); else selected.add(id);
   e.currentTarget.classList.toggle('on');
   renderSkillsSummary(); renderSkillGrid();
-}
-// ---- Vertical capability packs (Kernel): selected → loaded into the loop ----
-let allPacks = [];
-let selectedPacks = new Set();          // empty = load all (default); else just these
-async function loadPacks(){
-  try{ allPacks = (await (await fetch('/api/packs')).json()).packs || []; }catch(e){ allPacks = []; }
-}
-function openPacksFly(){
-  const fly = document.getElementById('packsFly');
-  const none = !allPacks.length ? '<div class="hist" style="padding:10px">No packs.</div>' : '';
-  fly.innerHTML = none || (`<div class="pd" style="padding:6px 12px 2px">未选=全部加载;选中=只加载所选(核心能力始终在)</div>` +
-    allPacks.map(p =>
-    `<div class="cfly-row ${selectedPacks.has(p.id)?'on':''}" onclick="togglePack(event,'${esc(p.id)}')">
-       <div class="pc">✓</div>
-       <div><div class="pn">${esc(p.name)}</div><div class="pd">${esc(p.description||'')} · ${(p.capabilities||[]).length} 能力</div></div>
-     </div>`).join(''));
-  fly.classList.add('open');
-}
-function togglePack(e, id){
-  e.stopPropagation();
-  if(selectedPacks.has(id)) selectedPacks.delete(id); else selectedPacks.add(id);
-  e.currentTarget.classList.toggle('on');
 }
 function pickModel(id, label, el){
   selectedModel = id;
@@ -1173,32 +1175,33 @@ function showLab(sub){
     document.getElementById('labtab-'+s).classList.toggle('active', s===sub));
   showView('lab');
 }
+const KIND_LABEL = {capability:'能力', pack:'垂直包', workflow:'工作流'};
+function skillCard(s){
+  const load = s.loading==='auto'
+    ? '<span class="lib-badge auto">常驻·自动</span>'
+    : '<span class="lib-badge select">可选·选中加载</span>';
+  const kind = `<span class="lib-badge kind">${esc(KIND_LABEL[s.kind]||s.kind)}</span>`;
+  let meta = '';
+  if(s.kind==='capability') meta = ((s.needs||[]).join(',')||'—')+' → '+(s.gives||[]).join(',');
+  else if(s.kind==='pack')  meta = '能力:'+(s.capabilities||[]).join(', ');
+  else if(s.kind==='workflow') meta = 'SKILL.md · '+(s.category||'General')+' · 仅 Domain 模式';
+  return `<div class="lib-card"><div class="lib-name">${esc(s.name)}${kind}${load}</div>`
+    + `<div class="lib-desc">${esc(s.description||'')}</div>`
+    + `<div class="lib-meta">${esc(meta)}</div></div>`;
+}
 async function loadLibrary(){
   const body = document.getElementById('libraryBody');
   body.innerHTML = '<div class="hist">Loading…</div>';
   try{
-    const [capR, packR, skills] = await Promise.all([
-      fetch('/api/capabilities').then(r=>r.json()),
-      fetch('/api/packs').then(r=>r.json()),
-      fetch('/api/skills').then(r=>r.json())
-    ]);
-    const caps = (capR && capR.capabilities) || [];
-    const packs = (packR && packR.packs) || [];
-    const core = caps.filter(c => c.tier === 'core');
-    const card = (name, io, desc) =>
-      `<div class="lib-card"><div class="lib-name">${esc(name)}<span class="lib-io">${esc(io)}</span></div>`
-      + `<div class="lib-desc">${esc(desc||'')}</div></div>`;
-    let html = `<div class="lib-h">Core Capabilities <span class="mut">${core.length} 个 · 常驻,loop 每步自动选用</span></div><div class="lib-grid">`;
-    html += core.map(c => card(c.name, ((c.needs||[]).join(',')||'—')+' → '+(c.gives||[]).join(','), c.description)).join('');
-    html += '</div>';
-    html += `<div class="lib-h">Vertical Packs <span class="mut">${packs.length} 个 · 垂直包,选中才加载(composer 的 Packs 里选)</span></div><div class="lib-grid">`;
-    html += packs.map(p => card(p.name, p.id, (p.description||'') + '　能力:' + (p.capabilities||[]).join(', '))).join('');
-    html += '</div>';
-    html += `<div class="lib-h">Skills <span class="mut">${(skills||[]).length} 个 · SKILL.md · 仅 Ask 的 Domain 模式用作系统提示</span></div><div class="lib-grid">`;
-    html += (skills||[]).map(s => card(s.name, s.category||'General', s.description)).join('');
-    html += '</div>';
+    const items = (await (await fetch('/api/library')).json()).skills || [];
+    const auto = items.filter(s => s.loading==='auto');
+    const sel  = items.filter(s => s.loading==='select');
+    let html = `<div class="lib-h">Skills · 常驻(自动加载) <span class="mut">${auto.length} 个 · loop 每步自动选用,无需选择</span></div>`;
+    html += '<div class="lib-grid">'+auto.map(skillCard).join('')+'</div>';
+    html += `<div class="lib-h">Skills · 垂直(选中才加载) <span class="mut">${sel.length} 个 · 在 composer 的 Skills 里勾选后进 loop</span></div>`;
+    html += '<div class="lib-grid">'+sel.map(skillCard).join('')+'</div>';
     body.innerHTML = html;
-    const ct = document.getElementById('navCapCt'); if(ct) ct.textContent = core.length + '+' + packs.length;
+    const ct = document.getElementById('navCapCt'); if(ct) ct.textContent = auto.length+'+'+sel.length;
   }catch(e){ body.innerHTML = '<div class="st-err">加载失败:'+esc(String(e))+'</div>'; }
 }
 // middle list column is context-sensitive: Ask=conversations, Lab=hypotheses
@@ -1760,7 +1763,7 @@ async function loadAudit(){
   }catch(e){ el.innerHTML = '<div class="hist">audit unavailable</div>'; }
 }
 
-loadSkills(); loadPacks(); loadMcp(); loadPortfolio(); loadObjects(); renderConvs(); showView('ask');
+loadSkills(); loadLibraryItems(); loadMcp(); loadPortfolio(); loadObjects(); renderConvs(); showView('ask');
 </script>
 </body>
 </html>

@@ -116,6 +116,33 @@ async def packs() -> JSONResponse:
                                    for pid, p in PACKS.items()]})
 
 
+@app.get("/api/library")
+async def library() -> JSONResponse:
+    """Unified skill manifest — one format for everything the agent can have:
+    core capabilities (loading=auto), vertical packs (loading=select), and SKILL.md
+    workflows (loading=select). ``kind`` distinguishes the mechanism."""
+    try:
+        from polyagents.kernel.modes import registry_for
+        from polyagents.kernel.packs import CORE, PACKS
+        caps = {c.name: c for c in registry_for("kernel")}
+        items = []
+        for n in CORE:                                   # always-on capabilities
+            c = caps.get(n)
+            if c:
+                items.append({"id": n, "name": n, "description": c.description,
+                              "kind": "capability", "loading": "auto",
+                              "needs": sorted(c.preconditions), "gives": sorted(c.effects)})
+        for pid, p in PACKS.items():                      # selectable vertical packs
+            items.append({"id": pid, "name": p["name"], "description": p["description"],
+                          "kind": "pack", "loading": "select", "capabilities": p["capabilities"]})
+        for s in list_skills():                           # selectable SKILL.md workflows
+            items.append({"id": s["id"], "name": s["name"], "description": s["description"],
+                          "kind": "workflow", "loading": "select", "category": s.get("category")})
+        return JSONResponse({"skills": items})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)})
+
+
 @app.get("/api/portfolio")
 async def portfolio() -> JSONResponse:
     try:
