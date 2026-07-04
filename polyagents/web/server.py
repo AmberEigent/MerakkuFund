@@ -930,17 +930,18 @@ def _kernel_summary(ctx) -> str:
         return out
     if "market_analysis" in f:                          # Goal-1 framework IS the grounded answer
         return _format_market_analysis(f["market_analysis"], path)  # no free-text append (avoids hallucinated punditry)
-    # Final analytical deliverables win over intermediate steps (e.g. collections):
-    if "alpha_hunt" in f:                                # top-level opportunity hunt
+    # Final analytical deliverables win over intermediate steps (e.g. collections).
+    # Focused scans (the pack the user selected) win over the broad hunt_alpha board.
+    if "microstructure" in f:                            # order-flow scan (focused)
+        return _format_microstructure(f["microstructure"], path)
+    if "news_sentiment" in f:                            # news + sentiment signal
+        return _format_news(f["news_sentiment"], path)
+    if "alpha_hunt" in f:                                # top-level opportunity hunt (broad)
         return _format_alpha_hunt(f["alpha_hunt"], path)
     if "skill_report" in f:                              # calibration / skill report
         return _format_skill_report(f["skill_report"], path)
     if "portfolio_review" in f:                          # paper portfolio + P&L
         return _format_portfolio(f["portfolio_review"], path)
-    if "microstructure" in f:                            # order-flow scan
-        return _format_microstructure(f["microstructure"], path)
-    if "news_sentiment" in f:                            # news + sentiment signal
-        return _format_news(f["news_sentiment"], path)
     if "crypto_arb" in f:                                # cross-market crypto arbitrage scan
         return _format_crypto_arb(f["crypto_arb"], path)
     if "promotion_verdict" in f:                         # Lab promotion gates — paper-ready?
