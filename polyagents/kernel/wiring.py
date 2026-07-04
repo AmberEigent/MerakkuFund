@@ -11,7 +11,8 @@ import math
 import re
 
 from .capabilities import (analyze_market_capability, answer_capability,
-                           backtest_capability, backtest_strategies_capability,
+                           backtest_capability, backtest_matrix_capability,
+                           backtest_strategies_capability,
                            batch_backtest_capability, batch_collect_capability,
                            crypto_arb_capability, data_capability,
                            discover_markets_capability, domain_capability,
@@ -352,6 +353,56 @@ def default_registry() -> list:
                 "strategies": strategies,
                 "paper_ready": any(s.get("paper_ready") for s in strategies)}
 
+    def _multi_score(markets, cap=12):
+        """Score EVERY signal on the same PIT candle slice per market (one price-history
+        fetch per market, not one per signal) → per-signal alpha summaries. Mirrors
+        BacktestRunner._score_market's point-in-time setup."""
+        from polyagents.evaluation.alpha import alpha_test
+        per = {name: [] for name in SIGNALS}
+        scored = 0
+        for m in markets:
+            if scored >= cap:
+                break
+            if not (m.price <= 0.05 or m.price >= 0.95):        # same extreme-price filter
+                continue
+            won = m.price >= 0.5
+            candles = eng.client.fetch_price_history(m.token_id, interval="max")
+            if len(candles) < 5:
+                continue
+            idx = min(max(int(0.5 * len(candles)), 4), len(candles) - 1)
+            pit = [c for c in candles[:idx] if c.ts < candles[idx].ts]
+            if len(pit) < 4:
+                continue
+            market_p = pit[-1].close
+            if not (0.02 < market_p < 0.98):
+                continue
+            for name, fn in SIGNALS.items():
+                per[name].append({"status": "resolved", "won": won,
+                                  "p_true": float(fn(pit, market_p)),
+                                  "market_price": market_p, "question": m.question})
+            scored += 1
+        return {name: alpha_test(recs) for name, recs in per.items()}, scored
+
+    def backtest_matrix(query, cap=12):
+        """Strategy × domain matrix: every signal over every category's resolved markets,
+        one consolidated board of which (if any) combos beat the market."""
+        raw = eng.client.list_resolved_markets(limit=120)
+        all_yes = [m for m in eng.client.to_markets(raw) if m.outcome == "YES"]
+        matrix = {}
+        for cat in ("crypto", "sports", "politics", "economy", "other"):
+            yes = [m for m in all_yes if categorize(m.question) == cat]
+            if not yes:
+                continue
+            summaries, n = _multi_score(yes, cap)
+            if n == 0:
+                continue
+            matrix[cat] = {"n": n, "signals": {
+                name: {"brier_delta": round(s.brier_delta, 4), "beats_market": s.beats_market}
+                for name, s in summaries.items()}}
+        winners = [(cat, sig) for cat, row in matrix.items()
+                   for sig, v in row["signals"].items() if v["beats_market"]]
+        return {"query": query, "signals": list(SIGNALS), "matrix": matrix, "winners": winners}
+
     def backtest_strategies(query):
         """Run every built-in strategy signal over the domain's resolved markets and
         compare — which (if any) beats the market."""
@@ -574,6 +625,7 @@ def default_registry() -> list:
         batch_collect_capability(batch_collect),
         batch_backtest_capability(batch_backtest),
         backtest_strategies_capability(backtest_strategies),
+        backtest_matrix_capability(backtest_matrix),
         promotion_gate_capability(promotion_gate),
         crypto_arb_capability(find_crypto_arb),
         hunt_alpha_capability(hunt_alpha),

@@ -828,6 +828,35 @@ def _format_promotion(v: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+def _format_backtest_matrix(a: dict, path: str) -> str:
+    """Render the strategy × domain matrix (brier_delta per cell, ✅ if beats market)."""
+    matrix = a.get("matrix") or {}
+    signals = a.get("signals") or []
+    lines = [f"**策略 × 领域 回测矩阵 · backtest_matrix** · {path}", ""]
+    if not matrix:
+        lines.append("没有足够的已结算市场可回测(各领域样本不足)。")
+        return "\n".join(lines)
+    cats = list(matrix.keys())
+    header = "| 策略＼领域 | " + " | ".join(f"{c}(n={matrix[c].get('n')})" for c in cats) + " |"
+    lines.append(header)
+    lines.append("|" + "---|" * (len(cats) + 1))
+    for sig in signals:
+        cells = []
+        for c in cats:
+            v = matrix[c]["signals"].get(sig, {})
+            bd = v.get("brier_delta")
+            mark = "✅" if v.get("beats_market") else ""
+            cells.append(f"{bd:+}{mark}" if isinstance(bd, (int, float)) else "—")
+        lines.append(f"| {sig} | " + " | ".join(cells) + " |")
+    winners = a.get("winners") or []
+    if winners:
+        lines.append("\n**跑赢市场的组合**:" + "、".join(f"{s}@{c}" for c, s in winners))
+    else:
+        lines.append("\n**结论**:**没有任何(策略,领域)组合稳定跑赢市场** —— 全域无 alpha(诚实,市场大体有效)。")
+    lines.append("\n_单元格=brier_delta(正=跑赢市场,✅=CI 不含 0 显著)。这些是价格历史技术信号,真 edge 更可能在 microstructure / crypto 套利。_")
+    return "\n".join(lines)
+
+
 def _format_strategy_comparison(c: dict, path: str) -> str:
     """Render the multi-strategy backtest comparison over a domain's resolved markets."""
     strats = c.get("strategies") or []
@@ -916,6 +945,8 @@ def _kernel_summary(ctx) -> str:
         return _format_crypto_arb(f["crypto_arb"], path)
     if "promotion_verdict" in f:                         # Lab promotion gates — paper-ready?
         return _format_promotion(f["promotion_verdict"], path)
+    if "backtest_matrix" in f:                           # strategy × domain matrix
+        return _format_backtest_matrix(f["backtest_matrix"], path)
     if "strategy_comparison" in f:                       # multi-strategy backtest comparison
         return _format_strategy_comparison(f["strategy_comparison"], path)
     if "backtest_report" in f:

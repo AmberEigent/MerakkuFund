@@ -272,6 +272,21 @@ def crypto_arb_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"crypto_arb"}), run, cost=3)
 
 
+def backtest_matrix_capability(fn: Callable) -> Capability:
+    """Strategy × domain backtest matrix (pack: backtest-lab).
+
+    ``fn(query) -> dict`` backtests every strategy signal over every market category's
+    resolved markets in one pass, returning a matrix of brier_delta / beats-market per
+    (strategy, domain) cell plus any winners — 'which strategy works where'."""
+    def run(ctx: Context) -> dict:
+        return {"backtest_matrix": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("backtest_matrix",
+                      "Backtest EVERY strategy across EVERY market domain at once → a matrix "
+                      "of which (strategy, domain) combos beat the market. Use for 'which "
+                      "strategy works in which domain', 'full strategy sweep', 'backtest matrix'.",
+                      frozenset({"question"}), frozenset({"backtest_matrix"}), run, cost=5)
+
+
 def backtest_strategies_capability(fn: Callable) -> Capability:
     """Backtest SEVERAL strategy signals over a domain's resolved markets and compare.
 

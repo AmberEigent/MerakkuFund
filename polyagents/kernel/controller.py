@@ -34,6 +34,8 @@ _SYS = (
     "discover_markets → recommend_markets).\n"
     "'Backtest a signal / one strategy over a domain' → batch_backtest. 'Compare / backtest "
     "the (multiple) strategies for a domain', 'which strategy works' → backtest_strategies. "
+    "'Which strategy works in which domain', 'full strategy sweep', 'backtest matrix' "
+    "(strategies ACROSS all domains) → backtest_matrix. "
     "'Is this strategy/domain paper-ready / good enough to promote / does it pass the gates' "
     "→ promotion_gate.\n"
     "'Find mispriced crypto markets', crypto arbitrage, 'Will BTC be above $X', hunting "

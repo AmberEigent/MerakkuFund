@@ -23,7 +23,7 @@ PACKS: dict[str, dict] = {
         "name": "回测 & 策略实验室",
         "description": "批量采集、单/多策略回测对比、Lab 晋级门(paper-ready 判定)。",
         "capabilities": ["batch_collect", "batch_backtest", "backtest_strategies",
-                         "promotion_gate", "data_agent", "backtest_agent"],
+                         "backtest_matrix", "promotion_gate", "data_agent", "backtest_agent"],
     },
     "crypto-arb": {
         "name": "跨市场 crypto 套利",
