@@ -11,7 +11,12 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat().replace("+00:00", "Z")
 
 
-def build_price_raw(candles: list[Candle], *, available_at: datetime) -> dict:
+def build_price_raw(
+    candles: list[Candle],
+    *,
+    available_at: datetime,
+    trades_flow: dict | None = None,
+) -> dict:
     """Build raw collector-like data using only PIT-safe price candles."""
     closes = [float(c.close) for c in candles]
     highs = [float(c.high) for c in candles]
@@ -41,10 +46,15 @@ def build_price_raw(candles: list[Candle], *, available_at: datetime) -> dict:
             "mid": None,
             "available_at": available,
         },
-        "trades_flow": {
+        "trades_flow": trades_flow or {
             "flow_imbalance": 0.0,
             "n_trades": 0,
+            "n_buys": 0,
+            "n_sells": 0,
+            "buy_notional": 0.0,
+            "sell_notional": 0.0,
             "available_at": available,
+            "source": "unavailable",
         },
         "news": {
             "sentiment": {"mean": 0.0},
@@ -54,3 +64,47 @@ def build_price_raw(candles: list[Candle], *, available_at: datetime) -> dict:
     raw["features"] = extract_features(raw)
     raw["features"]["available_at"] = available
     return raw
+
+
+def build_historical_trades_flow(
+    trades: list[dict],
+    *,
+    token_id: str,
+    min_ts: int,
+    max_ts: int,
+    available_at: datetime,
+) -> dict:
+    """Rebuild YES-side trade flow using only trades before prediction_time."""
+    buy_notional = sell_notional = 0.0
+    buys = sells = 0
+    for trade in trades:
+        if str(trade.get("asset") or "") != token_id:
+            continue
+        ts = trade.get("timestamp")
+        if not isinstance(ts, (int, float)) or not (min_ts <= int(ts) < max_ts):
+            continue
+        try:
+            size = float(trade.get("size"))
+            price = float(trade.get("price"))
+        except (TypeError, ValueError):
+            continue
+        notional = size * price
+        if str(trade.get("side") or "").upper() == "SELL":
+            sell_notional += notional
+            sells += 1
+        else:
+            buy_notional += notional
+            buys += 1
+    total = buy_notional + sell_notional
+    return {
+        "lookback_start_ts": min_ts,
+        "lookback_end_ts": max_ts,
+        "n_trades": buys + sells,
+        "n_buys": buys,
+        "n_sells": sells,
+        "buy_notional": buy_notional,
+        "sell_notional": sell_notional,
+        "flow_imbalance": (buy_notional - sell_notional) / total if total else 0.0,
+        "available_at": _iso(available_at),
+        "source": "historical_trades",
+    }

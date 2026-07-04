@@ -53,9 +53,13 @@ class HistoricalCollectionsIngestor:
                 stats.bump(reason)
                 continue
             candles = self.client.fetch_price_history(market.yes_token_id, interval="max")
+            trades = self.client.fetch_market_trades(market.condition_id) if market.condition_id else []
+            if trades:
+                self.store.insert_trades(market.condition_id, trades)
             collection, reason = build_historical_collection(
                 market,
                 candles,
+                trades=trades,
                 min_history=min_history,
                 prediction_policy=prediction_policy,
             )

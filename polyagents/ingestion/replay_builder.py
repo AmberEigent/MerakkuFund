@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from polyagents.dataflows.types import Candle, Market
 from polyagents.dataflows.utils import parse_iso, parse_json_field
 
-from .feature_builder import build_price_raw
+from .feature_builder import build_historical_trades_flow, build_price_raw
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -98,6 +98,7 @@ def build_historical_collection(
     market: SettledMarket,
     candles: list[Candle],
     *,
+    trades: list[dict] | None = None,
     min_history: int = 4,
     prediction_policy: str = "midpoint",
 ) -> tuple[dict | None, str | None]:
@@ -114,7 +115,14 @@ def build_historical_collection(
     available_at = pit_candles[-1].ts
     if available_at >= prediction_time or prediction_time >= market.resolution_time:
         return None, "skipped_pit"
-    raw = build_price_raw(pit_candles, available_at=available_at)
+    trades_flow = build_historical_trades_flow(
+        trades or [],
+        token_id=market.yes_token_id,
+        min_ts=int(pit_candles[0].ts.timestamp()),
+        max_ts=int(prediction_time.timestamp()),
+        available_at=available_at,
+    )
+    raw = build_price_raw(pit_candles, available_at=available_at, trades_flow=trades_flow)
     raw["available_at_max"] = _iso(available_at)
     raw["lab"] = {
         "outcome": market.outcome,

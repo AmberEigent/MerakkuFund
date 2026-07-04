@@ -52,15 +52,19 @@ def _candles(n=10, *, start=_T0, price=0.5):
 
 
 class _FakeClient:
-    def __init__(self, markets, histories):
+    def __init__(self, markets, histories, trades=None):
         self.markets = markets
         self.histories = histories
+        self.trades = trades or {}
 
     def list_resolved_markets(self, limit=100):
         return self.markets[:limit]
 
     def fetch_price_history(self, token_id, interval="max"):
         return self.histories.get(token_id, [])
+
+    def fetch_market_trades(self, condition_id, min_ts=None, max_pages=25):
+        return self.trades.get(condition_id, [])
 
 
 def _hypothesis(repo):
@@ -121,6 +125,28 @@ def test_collection_generation_shape_and_pit_metadata():
     assert raw["orderbook"]["book_pressure"] == 0.0
 
 
+def test_collection_generation_rebuilds_historical_trades_flow():
+    market, _ = parse_settled_binary_market(_raw_market())
+    trades = [
+        {"asset": "yes-token", "timestamp": int((_T0 + timedelta(hours=2)).timestamp()), "size": 10, "price": 0.5, "side": "BUY"},
+        {"asset": "yes-token", "timestamp": int((_T0 + timedelta(hours=3)).timestamp()), "size": 5, "price": 0.4, "side": "SELL"},
+        {"asset": "yes-token", "timestamp": int((_T0 + timedelta(hours=8)).timestamp()), "size": 100, "price": 0.9, "side": "BUY"},
+        {"asset": "no-token", "timestamp": int((_T0 + timedelta(hours=2)).timestamp()), "size": 99, "price": 0.2, "side": "BUY"},
+    ]
+
+    collection, reason = build_historical_collection(market, _candles(10), trades=trades, min_history=4)
+
+    flow = collection["raw"]["trades_flow"]
+    assert reason is None
+    assert flow["source"] == "historical_trades"
+    assert flow["n_trades"] == 2
+    assert flow["n_buys"] == 1
+    assert flow["n_sells"] == 1
+    assert flow["buy_notional"] == 5.0
+    assert flow["sell_notional"] == 2.0
+    assert collection["raw"]["features"]["factors"]["flow_imbalance"] == flow["flow_imbalance"]
+
+
 def test_collection_generation_skips_when_history_is_too_short():
     market, _ = parse_settled_binary_market(_raw_market())
     collection, reason = build_historical_collection(market, _candles(4), min_history=4)
@@ -131,7 +157,13 @@ def test_collection_generation_skips_when_history_is_too_short():
 
 def test_ingestion_inserts_and_deduplicates_collections(tmp_path):
     store = DataStore(tmp_path / "data.db")
-    client = _FakeClient([_raw_market()], {"yes-token": _candles(10)})
+    client = _FakeClient(
+        [_raw_market()],
+        {"yes-token": _candles(10)},
+        {"cond1": [
+            {"transactionHash": "h1", "asset": "yes-token", "timestamp": int((_T0 + timedelta(hours=2)).timestamp()), "size": 10, "price": 0.5, "side": "BUY"},
+        ]},
+    )
     ingestor = HistoricalCollectionsIngestor(client=client, store=store)
 
     first = ingestor.run(limit=10)
@@ -140,6 +172,7 @@ def test_ingestion_inserts_and_deduplicates_collections(tmp_path):
     assert first.inserted == 1
     assert second.duplicates == 1
     assert store.counts()["collections"] == 1
+    assert store.counts()["trades"] == 1
     assert store.collection_exists("yes-token", "2026-01-01T05:00:00Z")
     store.close()
 
