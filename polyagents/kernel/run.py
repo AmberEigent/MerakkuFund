@@ -32,10 +32,10 @@ def _goal_for(mode: str, request: str | None, facts: dict) -> Goal:
 def _default_controller_llm():
     """Build the controller LLM (best-effort; None if unavailable → deterministic)."""
     try:
-        from langchain_anthropic import ChatAnthropic
+        from polyagents.llm import build_chat_llm
         from polyagents.web.agent import resolve_model
         model = os.getenv("KERNEL_CONTROLLER_MODEL") or resolve_model(None)
-        return ChatAnthropic(model=model, temperature=0.0)
+        return build_chat_llm(model=model, temperature=0.0)
     except Exception:
         return None
 

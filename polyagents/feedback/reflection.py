@@ -35,4 +35,5 @@ def _build_prompt(record: dict) -> str:
 
 
 def reflect_on_outcome(llm, record: dict) -> Lesson:
-    return llm.with_structured_output(Lesson).invoke(_build_prompt(record))
+    from polyagents.llm import structured_output
+    return structured_output(llm, Lesson).invoke(_build_prompt(record))

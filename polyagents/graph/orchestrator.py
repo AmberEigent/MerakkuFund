@@ -102,9 +102,9 @@ class PolyAgentsGraph:
 
     def _get_llm(self):
         if self._llm is None:
-            from langchain_anthropic import ChatAnthropic
+            from polyagents.llm import build_chat_llm
 
-            self._llm = ChatAnthropic(
+            self._llm = build_chat_llm(
                 model=self.config["anthropic_model"],
                 temperature=self.config.get("anthropic_temperature", 0.0),
             )

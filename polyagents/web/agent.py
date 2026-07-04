@@ -225,12 +225,10 @@ def build_agent(selected_ids: list[str] | None = None, llm=None, model: str | No
     from langgraph.prebuilt import create_react_agent
 
     if llm is None:
-        from langchain_anthropic import ChatAnthropic
+        from polyagents.llm import build_chat_llm
 
-        llm = ChatAnthropic(
-            model=resolve_model(model),
-            temperature=DEFAULT_CONFIG.get("anthropic_temperature", 0.0),
-        )
+        llm = build_chat_llm(model=resolve_model(model),
+                             temperature=DEFAULT_CONFIG.get("anthropic_temperature", 0.0))
     prompt = _compose_prompt(selected_ids)
     if readonly:
         prompt = _ASK_PREAMBLE + "\n\n" + prompt
@@ -287,9 +285,9 @@ def build_general_agent(model: str | None = None, llm=None):
     from langgraph.prebuilt import create_react_agent
 
     if llm is None:
-        from langchain_anthropic import ChatAnthropic
+        from polyagents.llm import build_chat_llm
 
-        llm = ChatAnthropic(model=resolve_model(model),
-                            temperature=DEFAULT_CONFIG.get("anthropic_temperature", 0.0))
+        llm = build_chat_llm(model=resolve_model(model),
+                             temperature=DEFAULT_CONFIG.get("anthropic_temperature", 0.0))
     tools = [StructuredTool.from_function(web_search)]
     return create_react_agent(llm, tools, prompt=_GENERAL_PREAMBLE)
