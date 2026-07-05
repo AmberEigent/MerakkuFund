@@ -59,6 +59,14 @@ Then each run writes an EvaluationReport with its `strategy_id`
 And `market-naive-v1` acts as the market-price baseline
 And non-baseline strategies expose feature vectors and feature contributions.
 
+### TC-LAB-004B: Dry-Run Monitor
+
+Given active markets and a selected strategy
+When the user scans monitor opportunities
+Then the response contains candidate opportunities or an explicit no-opportunity result
+And every opportunity has `dry_run=true`
+And no paper or live execution call is triggered.
+
 ### TC-LAB-005: Show EvaluationReport
 
 Given a completed backtest

@@ -32,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from polyagents import mcp_server
 from polyagents.default_config import DEFAULT_CONFIG
 from polyagents.lab.backtest import BacktestRunner, get_backtest_run, get_report
+from polyagents.lab.monitor import LabMonitor, MonitorRequest
 from polyagents.lab.schemas import BacktestRequest, CreateHypothesisRequest
 from polyagents.lab.service import create_hypothesis, default_repository, get_hypothesis, list_hypotheses
 from polyagents.storage.db import DataStore
@@ -217,6 +218,16 @@ async def lab_run_backtest(id: str, request: Request) -> JSONResponse:
     finally:
         if store is not None:
             store.close()
+
+
+@app.post("/api/lab/monitor/opportunities")
+async def lab_monitor_opportunities(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        result = LabMonitor().scan(MonitorRequest(**payload))
+        return JSONResponse(result)
+    except Exception as exc:
+        return JSONResponse({"error": {"code": "monitor_failed", "message": str(exc)}}, status_code=400)
 
 
 @app.get("/api/lab/backtests/{id}")

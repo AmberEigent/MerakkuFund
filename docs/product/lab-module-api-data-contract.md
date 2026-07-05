@@ -321,6 +321,49 @@ collection data already contains `lab.p_raw`, the report may mark the source as
 lists the prediction time, latest known feature availability, and source fields
 used to reconstruct the historical snapshot.
 
+### 4.6 MonitorOpportunity
+
+Dry-run only opportunity candidates from active markets:
+
+```json
+{
+  "market_token_id": "token_yes",
+  "question": "Will BTC close above 100k?",
+  "strategy_id": "momentum-v1",
+  "p_raw": 0.66,
+  "p_cal": 0.61,
+  "market_price": 0.52,
+  "edge": 0.09,
+  "apy": 1.2,
+  "action": "buy",
+  "size_usdc": 25.0,
+  "dry_run": true,
+  "reasons": [],
+  "market": {
+    "condition_id": "0x...",
+    "outcome": "YES",
+    "volume_24h": 100000.0,
+    "liquidity": 25000.0,
+    "days_to_expiry": 10.0
+  },
+  "signal_model": {
+    "id": "momentum-v1",
+    "baseline": "market_price",
+    "feature_vector": {
+      "price_momentum": 0.2,
+      "flow_imbalance": 0.1
+    },
+    "feature_contributions": {
+      "price_momentum": 0.056,
+      "flow_imbalance": 0.006
+    }
+  }
+}
+```
+
+Monitor output must always keep `dry_run=true` and must not call paper or live
+execution endpoints.
+
 ## 5. Storage Contract
 
 MVP adds these logical tables. Implementation may reuse `DataStore` or introduce a Lab-specific store, but table-level semantics must remain stable.
@@ -538,7 +581,37 @@ Returns an EvaluationReport.
 
 Response is the EvaluationReport schema.
 
-### 6.7 `GET /api/lab/system/status`
+### 6.7 `POST /api/lab/monitor/opportunities`
+
+Scans active markets with a selected Lab strategy. This endpoint is read-only
+and dry-run only.
+
+Request:
+
+```json
+{
+  "strategy_id": "momentum-v1",
+  "limit": 20,
+  "min_volume_24h": 5000.0,
+  "min_edge": 0.02,
+  "include_holds": true
+}
+```
+
+Response:
+
+```json
+{
+  "strategy_id": "momentum-v1",
+  "dry_run": true,
+  "n": 1,
+  "opportunities": [],
+  "message": "ok",
+  "errors": []
+}
+```
+
+### 6.8 `GET /api/lab/system/status`
 
 Read-only Lab view of System resources.
 
