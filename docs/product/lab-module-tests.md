@@ -54,7 +54,7 @@ And the Hypothesis latest `eval_summary` is updated.
 ### TC-LAB-004A: Run Strategy-Aware Backtest
 
 Given the same settled-market collections
-When the user runs `market-naive-v1`, `linear-factor-v1`, and `momentum-v1`
+When the user runs the Lab strategy registry
 Then each run writes an EvaluationReport with its `strategy_id`
 And `market-naive-v1` acts as the market-price baseline
 And non-baseline strategies expose feature vectors and feature contributions.

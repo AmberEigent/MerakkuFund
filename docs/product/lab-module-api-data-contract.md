@@ -136,7 +136,9 @@ Validation:
 - `start < end`
 - `settled_only` must be true in MVP
 - `strategy_id` defaults to `linear-factor-v1`
-- allowed MVP strategies are `market-naive-v1`, `linear-factor-v1`, and `momentum-v1`
+- allowed MVP strategies are `market-naive-v1`, `linear-factor-v1`,
+  `momentum-v1`, `flow-imbalance-v1`, `microstructure-v1`, `sentiment-v1`,
+  and `contrarian-v1`
 - `pit_strict` defaults to true
 - `max_markets` must be between 1 and 500
 
@@ -224,7 +226,11 @@ Rules:
     "available_strategies": [
       "linear-factor-v1",
       "market-naive-v1",
-      "momentum-v1"
+      "momentum-v1",
+      "flow-imbalance-v1",
+      "microstructure-v1",
+      "sentiment-v1",
+      "contrarian-v1"
     ]
   },
   "market_universe": {

@@ -84,6 +84,20 @@ def test_lab_ui_uses_lab_api_contract():
     assert "Strategy-aware evidence backtest" in html
     assert "Dry-run monitor · active opportunities" in html
     assert "Reports · EvaluationReport ledger" in html
+    assert "Historical replay · resolved price history" in html
+    assert "qlib factor backtest · experimental" in html
+    assert "点击任一 report 查看完整 EvaluationReport review" in html
+    assert "Open Backtest workflow" in html
+    for strategy_id in (
+        "linear-factor-v1",
+        "market-naive-v1",
+        "momentum-v1",
+        "flow-imbalance-v1",
+        "microstructure-v1",
+        "sentiment-v1",
+        "contrarian-v1",
+    ):
+        assert strategy_id in html
     assert "labFetchJson('/api/lab/data/status')" in html
     assert "labFetchJson('/api/lab/data/ingest'" in html
     assert "labFetchJson('/api/lab/monitor/opportunities'" in html
