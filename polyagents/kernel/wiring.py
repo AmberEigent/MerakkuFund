@@ -30,6 +30,25 @@ def _norm_cdf(x: float) -> float:
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
+def _plain_answer(question: str, emit=None) -> str:
+    """No-tools fallback: a plain LLM answer when the ReAct tool-agent errors (e.g. a
+    DeepSeek malformed tool call → 400 'bad parameter'). Keeps the loop answering
+    instead of surfacing a raw API error."""
+    from polyagents.llm import build_chat_llm
+    try:
+        resp = build_chat_llm(temperature=0.2).invoke([
+            ("system", "You are a Polymarket prediction-market research assistant. Answer "
+             "concisely and honestly from general knowledge; if you could not fetch live "
+             "market data, say so briefly in one line."),
+            ("user", question or "")])
+        text = _chunk_text(getattr(resp, "content", resp))
+    except Exception as exc:
+        text = f"(暂时无法完成:{exc})"
+    if emit is not None:
+        emit({"type": "token", "text": text})
+    return text
+
+
 _CX_ASSETS = {"btc": "BTC", "bitcoin": "BTC", "eth": "ETH", "ethereum": "ETH",
               "sol": "SOL", "solana": "SOL", "xrp": "XRP", "doge": "DOGE",
               "dogecoin": "DOGE", "bnb": "BNB", "ada": "ADA", "cardano": "ADA"}
@@ -597,21 +616,33 @@ def default_registry() -> list:
 
     def answer(question):                              # general / web-search agent
         from polyagents.web.agent import build_general_agent
-        return _last_content(build_general_agent().invoke(
-            {"messages": [("user", question or "")]}))
+        try:
+            return _last_content(build_general_agent().invoke(
+                {"messages": [("user", question or "")]}))
+        except Exception:                              # tool-call/API error → no-tools fallback
+            return _plain_answer(question)
 
     def answer_stream(question, emit):
         from polyagents.web.agent import build_general_agent
-        return _stream_agent(build_general_agent(), question, emit)
+        try:
+            return _stream_agent(build_general_agent(), question, emit)
+        except Exception:
+            return _plain_answer(question, emit)
 
     def domain_answer(question):                       # read-only market-tools agent
         from polyagents.web.agent import build_agent
-        return _last_content(build_agent(readonly=True).invoke(
-            {"messages": [("user", question or "")]}))
+        try:
+            return _last_content(build_agent(readonly=True).invoke(
+                {"messages": [("user", question or "")]}))
+        except Exception:
+            return _plain_answer(question)
 
     def domain_stream(question, emit):
         from polyagents.web.agent import build_agent
-        return _stream_agent(build_agent(readonly=True), question, emit)
+        try:
+            return _stream_agent(build_agent(readonly=True), question, emit)
+        except Exception:                              # DeepSeek bad tool-call → graceful text
+            return _plain_answer(question, emit)
 
     def run_strategy(market):
         from polyagents.orchestration import run_strategy as _rs
