@@ -149,6 +149,112 @@ def promotion_gate_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"promotion_verdict"}), run, cost=4)
 
 
+def settle_and_reflect_capability(fn: Callable) -> Capability:
+    """Settle resolved paper trades + Layer-4 reflection (pack: paper-exec).
+
+    ``fn(query) -> dict`` settles any paper position whose market has resolved (books
+    $1/$0 payout and realised P&L) and writes a reflection lesson per trade — closing
+    the feedback loop so evaluate_skill has data and future signals learn."""
+    def run(ctx: Context) -> dict:
+        return {"settlement": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("settle_and_reflect",
+                      "Settle resolved PAPER trades (book P&L) and reflect on each outcome "
+                      "(what the signal got right/wrong → a lesson). Use for 'settle my trades', "
+                      "'close resolved positions', 'what did we learn'.",
+                      frozenset({"question"}), frozenset({"settlement"}), run, cost=3)
+
+
+def paper_trade_capability(fn: Callable) -> Capability:
+    """Paper-trade a market — the loop's one 'act' capability (pack: paper-exec, gated).
+
+    ``fn(market_ref) -> dict`` analyses the market, takes the deterministic sized/risk-
+    gated decision, and — only if it's an actionable buy/sell — places a PAPER order
+    through the circuit breaker, updating the paper portfolio. Most markets are efficient
+    so the honest result is usually HOLD (no trade). Paper money only."""
+    def run(ctx: Context) -> dict:
+        return {"paper_trade": fn(ctx.facts["market_ref"])}
+    return Capability("paper_trade",
+                      "PAPER-trade a specific market: size + risk-gate the decision and, if "
+                      "actionable (buy/sell), place a paper order through the circuit breaker. "
+                      "Paper money only. Use for 'paper trade X', 'take a position on X', 'buy/"
+                      "sell X (paper)'. Needs a resolved market first (resolve_market/analyze).",
+                      frozenset({"market_ref"}), frozenset({"paper_trade"}), run, cost=4)
+
+
+def evaluate_skill_capability(fn: Callable) -> Capability:
+    """Calibration / skill report — does our p_cal actually beat the market baseline?
+
+    ``fn(query) -> dict`` runs the evaluation over the decision log (Brier / log-loss /
+    ECE vs the market price, by category). If we don't beat the market, the edge is
+    noise — this is the honest 'do we have any skill' check."""
+    def run(ctx: Context) -> dict:
+        return {"skill_report": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("evaluate_skill",
+                      "Report whether our forecasts beat the market baseline over time "
+                      "(Brier / calibration / ECE, by category) — 'do we actually have skill / "
+                      "alpha', 'calibration report', 'are we beating the market'.",
+                      frozenset({"question"}), frozenset({"skill_report"}), run, cost=2)
+
+
+def portfolio_review_capability(fn: Callable) -> Capability:
+    """Paper portfolio + P&L review. ``fn(query) -> dict`` returns cash / exposure /
+    positions plus the realised-P&L / hit-rate / attribution report."""
+    def run(ctx: Context) -> dict:
+        return {"portfolio_review": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("portfolio_review",
+                      "Show the paper portfolio and P&L: cash, open positions, exposure, "
+                      "realised P&L, hit rate and attribution. Use for 'show my portfolio / "
+                      "P&L / positions / how are my trades doing'.",
+                      frozenset({"question"}), frozenset({"portfolio_review"}), run, cost=1)
+
+
+def news_sentiment_capability(fn: Callable) -> Capability:
+    """News + sentiment for a market/topic — an event-driven signal (pack: news-events).
+
+    ``fn(query) -> dict`` searches recent news for the query and scores each item's
+    sentiment, aggregating a bullish/bearish read. Needs TAVILY_API_KEY; degrades
+    gracefully when unset."""
+    def run(ctx: Context) -> dict:
+        return {"news_sentiment": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("news_sentiment",
+                      "Pull recent NEWS for a market/topic and score its sentiment "
+                      "(bullish/bearish) — an event-driven signal. Use for 'what's the news / "
+                      "sentiment on X', 'any headlines moving this market'.",
+                      frozenset({"question"}), frozenset({"news_sentiment"}), run, cost=3)
+
+
+def microstructure_scan_capability(fn: Callable) -> Capability:
+    """Scan live order-book microstructure / smart-money flow across markets (pack:
+    microstructure). ``fn(query) -> dict`` collects L1 microstructure for a batch of
+    markets and ranks them by flow/book conviction vs a lagging price — the deep,
+    dedicated version of hunt_alpha's flow section."""
+    def run(ctx: Context) -> dict:
+        return {"microstructure": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("microstructure_scan",
+                      "Scan order-book microstructure and trade-flow across a BATCH of markets "
+                      "(optionally a category) — micro-price, depth imbalance, book pressure, "
+                      "flow imbalance — and rank where smart money leads a lagging price. Use "
+                      "for 'scan microstructure / order flow', 'where is the smart money'.",
+                      frozenset({"question"}), frozenset({"microstructure"}), run, cost=4)
+
+
+def hunt_alpha_capability(fn: Callable) -> Capability:
+    """Top-level opportunity hunt — one request → scan the universe → consolidated board.
+
+    ``fn(query) -> dict`` runs the deterministic edge detectors across market types
+    (crypto spot-vs-implied mispricing + microstructure / smart-money flow) and returns
+    a ranked opportunity report. This is the 'batch-automate and give me results' entry
+    point: it orchestrates several scanners into one honest board."""
+    def run(ctx: Context) -> dict:
+        return {"alpha_hunt": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("hunt_alpha",
+                      "Hunt for trading opportunities ACROSS the market universe in one go: "
+                      "scan crypto spot-vs-implied mispricings and microstructure / smart-money "
+                      "flow signals, then rank them into one opportunity board. Use for 'find "
+                      "alpha', 'scan for opportunities', 'what's worth trading right now'.",
+                      frozenset({"question"}), frozenset({"alpha_hunt"}), run, cost=5)
+
+
 def crypto_arb_capability(fn: Callable) -> Capability:
     """Cross-market crypto arbitrage — the cross-market-arb strategy as a loop capability.
 
@@ -164,6 +270,21 @@ def crypto_arb_capability(fn: Callable) -> Capability:
                       "the market's implied probability. Use for crypto arbitrage, 'find "
                       "mispriced crypto markets', or hunting valuable trading opportunities.",
                       frozenset({"question"}), frozenset({"crypto_arb"}), run, cost=3)
+
+
+def backtest_matrix_capability(fn: Callable) -> Capability:
+    """Strategy × domain backtest matrix (pack: backtest-lab).
+
+    ``fn(query) -> dict`` backtests every strategy signal over every market category's
+    resolved markets in one pass, returning a matrix of brier_delta / beats-market per
+    (strategy, domain) cell plus any winners — 'which strategy works where'."""
+    def run(ctx: Context) -> dict:
+        return {"backtest_matrix": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("backtest_matrix",
+                      "Backtest EVERY strategy across EVERY market domain at once → a matrix "
+                      "of which (strategy, domain) combos beat the market. Use for 'which "
+                      "strategy works in which domain', 'full strategy sweep', 'backtest matrix'.",
+                      frozenset({"question"}), frozenset({"backtest_matrix"}), run, cost=5)
 
 
 def backtest_strategies_capability(fn: Callable) -> Capability:
