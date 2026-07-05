@@ -59,7 +59,8 @@ def test_server_app_has_routes():
     for p in ("/", "/api/chat", "/api/skills", "/api/mcp", "/api/portfolio",
               "/api/markets", "/api/backtest", "/api/lab/hypotheses",
               "/api/lab/hypotheses/{id}", "/api/lab/hypotheses/{id}/backtests",
-              "/api/lab/reports/{id}"):
+              "/api/lab/reports/{id}", "/api/lab/data/status",
+              "/api/lab/data/ingest", "/api/lab/monitor/opportunities"):
         assert p in paths
 
 
@@ -79,6 +80,14 @@ def test_lab_ui_uses_lab_api_contract():
     assert "signal_model" in html or "model=" in html
     assert "真实历史 collections" in html
     assert "样本量不足" in html
+    assert "Data ingestion · historical settled collections" in html
+    assert "Strategy-aware evidence backtest" in html
+    assert "Dry-run monitor · active opportunities" in html
+    assert "Reports · EvaluationReport ledger" in html
+    assert "labFetchJson('/api/lab/data/status')" in html
+    assert "labFetchJson('/api/lab/data/ingest'" in html
+    assert "labFetchJson('/api/lab/monitor/opportunities'" in html
+    assert "dry_run=true" in html
     assert "function labFetchJson" in html
     assert "labFetchJson('/api/lab/hypotheses')" in html
     assert "'/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests'" in html

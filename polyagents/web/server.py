@@ -31,6 +31,7 @@ from fastapi.staticfiles import StaticFiles
 
 from polyagents import mcp_server
 from polyagents.default_config import DEFAULT_CONFIG
+from polyagents.ingestion.polymarket_ingest import run_polymarket_ingestion
 from polyagents.lab.backtest import BacktestRunner, get_backtest_run, get_report
 from polyagents.lab.monitor import LabMonitor, MonitorRequest
 from polyagents.lab.schemas import BacktestRequest, CreateHypothesisRequest
@@ -198,6 +199,51 @@ async def lab_hypothesis_detail(id: str) -> JSONResponse:
         "reports": default_repository().reports_for_hypothesis(id),
         "audit_tail": [],
     })
+
+
+@app.get("/api/lab/data/status")
+async def lab_data_status() -> JSONResponse:
+    store = None
+    try:
+        store = DataStore(DEFAULT_CONFIG["db_path"])
+        counts = store.counts()
+        rows = store.fetch_collections(limit=500)
+        usable = 0
+        fixture_like = 0
+        for row in rows:
+            raw = row.get("raw") or {}
+            lab = raw.get("lab") or {}
+            if lab.get("outcome", raw.get("outcome")) is not None:
+                usable += 1
+            source = lab.get("ingestion_source")
+            if source is None:
+                fixture_like += 1
+        return JSONResponse({
+            "db_path": DEFAULT_CONFIG["db_path"],
+            "counts": counts,
+            "collections": {
+                "total": counts.get("collections", 0),
+                "usable_settled": usable,
+                "unresolved_or_unusable": max(0, counts.get("collections", 0) - usable),
+                "unknown_source": fixture_like,
+            },
+        })
+    except Exception as exc:
+        return JSONResponse({"error": {"code": "data_status_failed", "message": str(exc)}}, status_code=400)
+    finally:
+        if store is not None:
+            store.close()
+
+
+@app.post("/api/lab/data/ingest")
+async def lab_data_ingest(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        limit = int(payload.get("limit", 100))
+        stats = run_polymarket_ingestion(limit=limit, db_path=DEFAULT_CONFIG["db_path"])
+        return JSONResponse({"dry_run": False, "stats": asdict(stats)})
+    except Exception as exc:
+        return JSONResponse({"error": {"code": "ingestion_failed", "message": str(exc)}}, status_code=400)
 
 
 @app.post("/api/lab/hypotheses/{id}/backtests")
