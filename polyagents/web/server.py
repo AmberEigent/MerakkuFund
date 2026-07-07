@@ -93,13 +93,54 @@ async def mcp_servers() -> JSONResponse:
 
 @app.get("/api/capabilities")
 async def capabilities() -> JSONResponse:
-    """The kernel loop's capabilities (what the controller can auto-select each step)."""
+    """The kernel loop's capabilities, tagged core (always on) vs which vertical pack."""
     try:
         from polyagents.kernel.modes import registry_for
+        from polyagents.kernel.packs import CORE, PACKS
+        of_pack = {cap: pid for pid, p in PACKS.items() for cap in p["capabilities"]}
         caps = [{"name": c.name, "description": c.description,
-                 "needs": sorted(c.preconditions), "gives": sorted(c.effects), "cost": c.cost}
-                for c in registry_for("kernel")]
+                 "needs": sorted(c.preconditions), "gives": sorted(c.effects),
+                 "tier": "core" if c.name in CORE else "pack",
+                 "pack": of_pack.get(c.name)}
+                for c in registry_for("kernel")]   # None packs = all, so every capability shows
         return JSONResponse({"capabilities": caps})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)})
+
+
+@app.get("/api/packs")
+async def packs() -> JSONResponse:
+    """Selectable vertical capability packs (loaded on demand by the kernel)."""
+    from polyagents.kernel.packs import PACKS
+    return JSONResponse({"packs": [{"id": pid, "name": p["name"],
+                                    "description": p["description"],
+                                    "capabilities": p["capabilities"]}
+                                   for pid, p in PACKS.items()]})
+
+
+@app.get("/api/library")
+async def library() -> JSONResponse:
+    """Unified skill manifest — one format for everything the agent can have:
+    core capabilities (loading=auto), vertical packs (loading=select), and SKILL.md
+    workflows (loading=select). ``kind`` distinguishes the mechanism."""
+    try:
+        from polyagents.kernel.modes import registry_for
+        from polyagents.kernel.packs import CORE, PACKS
+        caps = {c.name: c for c in registry_for("kernel")}
+        items = []
+        for n in CORE:                                   # always-on capabilities
+            c = caps.get(n)
+            if c:
+                items.append({"id": n, "name": n, "description": c.description,
+                              "kind": "capability", "loading": "auto",
+                              "needs": sorted(c.preconditions), "gives": sorted(c.effects)})
+        for pid, p in PACKS.items():                      # selectable vertical packs
+            items.append({"id": pid, "name": p["name"], "description": p["description"],
+                          "kind": "pack", "loading": "select", "capabilities": p["capabilities"]})
+        for s in list_skills():                           # selectable SKILL.md workflows
+            items.append({"id": s["id"], "name": s["name"], "description": s["description"],
+                          "kind": "workflow", "loading": "select", "category": s.get("category")})
+        return JSONResponse({"skills": items})
     except Exception as exc:
         return JSONResponse({"error": str(exc)})
 
@@ -642,6 +683,147 @@ def _answer_text(f) -> str:
     return str(body)
 
 
+def _format_settlement(a: dict, path: str) -> str:
+    """Render settle + reflect: resolved paper trades booked, with lessons."""
+    recs = a.get("settled") or []
+    p = a.get("portfolio", {}) or {}
+    lines = [f"**结算 & 反思 · settle_and_reflect** · {path}", ""]
+    if not recs:
+        lines.append("当前没有可结算的交易(无已解决的纸面持仓)。先用 paper_trade 下单,等市场结算后再来。")
+        return "\n".join(lines)
+    lines.append(f"结算了 **{a.get('n_settled')}** 笔:")
+    lines.append("\n| 市场 | 结果 | 已实现 P&L | 收益率 |")
+    lines.append("|---|---|---|---|")
+    for s in recs:
+        won = "✅赢" if s.get("won") else "❌输"
+        ret = s.get("realized_return")
+        lines.append(f"| {(s.get('question') or '')[:34]} | {won} | {s.get('realized_pnl')} | "
+                     f"{(f'{ret:+.1%}' if isinstance(ret, (int, float)) else '—')} |")
+    lessons = [s.get("lesson") for s in recs if s.get("lesson")]
+    if lessons:
+        lines.append("\n**反思(Layer 4 lessons)**:")
+        for ls in lessons[:5]:
+            lines.append(f"- {ls}")
+    lines.append(f"\n**组合(纸面)**:现金 ${p.get('cash')} · 已实现 P&L ${p.get('realized_pnl')} · "
+                 f"持仓 {len(p.get('open_positions') or [])} 个")
+    lines.append("\n_结算写入决策日志与 lesson,下次同类市场的信号会带上这些教训;整体表现 → evaluate_skill。_")
+    return "\n".join(lines)
+
+
+def _format_paper_trade(a: dict, path: str) -> str:
+    """Render the paper-trade outcome (sized decision + circuit-breaker result)."""
+    if a.get("error"):
+        return f"**纸面交易 · paper_trade** · {path}\n\n失败:{a['error']}"
+    m = a.get("market", {})
+    act = (a.get("action") or "hold").upper()
+    p = a.get("portfolio", {}) or {}
+    lines = [f"**纸面交易 · paper_trade** · {path}", "",
+             f"**标的**:{m.get('question')}  \n价 {m.get('price')} · p_true={a.get('p_true')} · "
+             f"edge={a.get('edge')} · 建议 size ${a.get('size_usdc')}"]
+    if a.get("executed"):
+        r = a.get("result") or {}
+        lines.append(f"\n→ **{act} 已成交(纸面)** · status={r.get('status')} · 已实现 P&L {r.get('realized_pnl')}")
+    elif a.get("action") in ("buy", "sell"):
+        r = a.get("result") or {}
+        lines.append(f"\n→ **{act} 未成交** · status={r.get('status')} · {r.get('reason') or '被风控拦截'}")
+    else:
+        lines.append(f"\n→ **HOLD**,未达门槛,不下单(edge 不足或风控)。这是常态,不是失败。")
+    if a.get("reasons"):
+        lines.append("　依据:" + "；".join(str(x) for x in a["reasons"][:3]))
+    lines.append(f"\n**组合(纸面)**:现金 ${p.get('cash')} · 敞口 ${p.get('exposure')} · "
+                 f"已实现 P&L ${p.get('realized_pnl')} · 持仓 {len(p.get('open_positions') or [])} 个")
+    lines.append("\n_纸面交易(paper money),经风控/熔断。想看整体表现 → portfolio_review;结算后 → evaluate_skill。_")
+    return "\n".join(lines)
+
+
+def _format_skill_report(a: dict, path: str) -> str:
+    """Render the calibration / skill report (does p_cal beat market)."""
+    return f"**技能评估 · evaluate_skill** · {path}\n\n```\n{a.get('report', '(无数据)')}\n```"
+
+
+def _format_portfolio(a: dict, path: str) -> str:
+    """Render the paper portfolio + P&L."""
+    p = a.get("portfolio", {}) or {}
+    pos = p.get("open_positions") or []
+    lines = [f"**纸面组合 & P&L · portfolio_review** · {path}", "",
+             f"现金 ${p.get('cash')} · 敞口 ${p.get('exposure')} · 已实现 P&L ${p.get('realized_pnl')} · "
+             f"持仓 {len(pos)} 个"]
+    if pos:
+        lines.append("\n| 市场 | 份额 | 均价 |")
+        lines.append("|---|---|---|")
+        for x in pos:
+            lines.append(f"| {(x.get('market') or '')[:40]} | {x.get('shares')} | {x.get('avg_price')} |")
+    else:
+        lines.append("\n_当前无持仓(paper)。_")
+    lines.append(f"\n**P&L / 归因**\n```\n{a.get('pnl', '(无交易记录)')}\n```")
+    return "\n".join(lines)
+
+
+def _format_news(a: dict, path: str) -> str:
+    """Render the news + sentiment signal for a market/topic."""
+    lines = [f"**新闻 / 事件情绪 · news_sentiment** · {path}", "", f"_主题:{a.get('query')}_"]
+    if not a.get("enabled"):
+        lines.append("\n" + (a.get("note") or "新闻检索未启用。"))
+        return "\n".join(lines)
+    items = a.get("items") or []
+    lines.append(f"\n**综合情绪**:{a.get('signal')}(均分 {a.get('mean_sentiment')},共 {a.get('n_items')} 条)")
+    if items:
+        lines.append("\n| 情绪 | 标题 |")
+        lines.append("|---|---|")
+        for it in items:
+            lines.append(f"| {it.get('sentiment'):+} | [{(it.get('title') or '')[:60]}]({it.get('url')}) |")
+    lines.append("\n_情绪分 ∈ [−1,1],词典打分;>0.1 偏多、<−0.1 偏空。事件驱动信号,非确定性。_")
+    return "\n".join(lines)
+
+
+def _format_microstructure(a: dict, path: str) -> str:
+    """Render the microstructure / flow scan across markets."""
+    mk = a.get("markets") or []
+    lines = [f"**微结构 / 资金流扫描 · microstructure_scan** · {path}", "",
+             f"_领域:{a.get('category')} · 扫了 {a.get('n_scanned')} 个市场,取 top_"]
+    if not mk:
+        lines.append("\n未扫到可用市场。")
+        return "\n".join(lines)
+    lines.append("\n| 市场 | flow | book | micro-mid | 量能x | 动量 | 点差bps | 倾向 | 分 |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
+    for s in mk:
+        lines.append(f"| {(s.get('question') or '')[:22]} | {s.get('flow_imbalance'):+} | "
+                     f"{s.get('book_pressure'):+} | {s.get('micro_vs_mid'):+} | {s.get('volume_spike')} | "
+                     f"{s.get('price_momentum'):+} | {s.get('spread_bps')} | {s.get('lean')} | {s.get('score')} |")
+    lines.append("\n_分越高=资金流/盘口越单边且价格越没跟上(潜在 edge)。点差>300bps 视为难交易(降权)。想深挖某个 → analyze_market。_")
+    return "\n".join(lines)
+
+
+def _format_alpha_hunt(a: dict, path: str) -> str:
+    """Render the top-level opportunity hunt: crypto mispricings + microstructure flow."""
+    crypto = a.get("crypto") or []
+    flow = a.get("flow") or []
+    lines = [f"**机会总扫描 · hunt_alpha** · {path}", "", f"_主题:{a.get('query')}_"]
+    lines.append(f"\n**① Crypto 现货 vs 隐含错价**({a.get('n_crypto', 0)} 个,终端型)")
+    if crypto:
+        lines.append("\n| 市场 | 现货 | 行权 | 模型p | 市场价 | gap |")
+        lines.append("|---|---|---|---|---|---|")
+        for o in crypto:
+            lines.append(f"| {(o.get('question') or '')[:28]} | {o.get('spot')} | {o.get('strike')} | "
+                         f"{o.get('p_model')} | {o.get('market_price')} | {o.get('gap'):+} |")
+    else:
+        lines.append("\n　(暂无可评分的终端型 crypto 错价)")
+    lines.append(f"\n**② 微结构 / 资金流信号**(扫了 {a.get('n_flow_scanned', 0)} 个活跃市场,取 top)")
+    if flow:
+        lines.append("\n| 市场 | flow | book | 量能x | 动量 | 点差bps | 倾向 | 分 |")
+        lines.append("|---|---|---|---|---|---|---|---|")
+        for s in flow:
+            lines.append(f"| {(s.get('question') or '')[:24]} | {s.get('flow_imbalance'):+} | "
+                         f"{s.get('book_pressure'):+} | {s.get('volume_spike')} | {s.get('price_momentum'):+} | "
+                         f"{s.get('spread_bps')} | {s.get('lean')} | {s.get('score')} |")
+    else:
+        lines.append("\n　(暂无明显资金流信号)")
+    lines.append("\n_① 终端型 crypto:模型概率 vs 市场价,gap 越负=市场越高估上行。_")
+    lines.append("_② 资金流:强单边 flow/book 且价格未跟上=潜在 edge;分越高越值得深挖。点差>300bps 视为难交易(降权)。_")
+    lines.append("_均为**信号非确定性**。想深挖某个 → 对它跑 analyze_market;想验证策略 → backtest_strategies / promotion_gate。_")
+    return "\n".join(lines)
+
+
 def _format_crypto_arb(a: dict, path: str) -> str:
     """Render the crypto cross-market arbitrage scan (spot vs implied probability)."""
     opps = a.get("opportunities") or []
@@ -700,6 +882,35 @@ def _format_promotion(v: dict, path: str) -> str:
         lines.append("\n**结论**:**没有策略够上 paper** —— 全部卡在门上(通常是 *跑赢市场* 那道:没有 alpha)。")
     lines.append("\n_晋级门(Lab 规则):样本足(n≥30)+ 跑赢市场(CI 不含 0)+ 校准 ECE≤0.05 + PIT 无泄漏,"
                  "四门全过才 paper-ready。_")
+    return "\n".join(lines)
+
+
+def _format_backtest_matrix(a: dict, path: str) -> str:
+    """Render the strategy × domain matrix (brier_delta per cell, ✅ if beats market)."""
+    matrix = a.get("matrix") or {}
+    signals = a.get("signals") or []
+    lines = [f"**策略 × 领域 回测矩阵 · backtest_matrix** · {path}", ""]
+    if not matrix:
+        lines.append("没有足够的已结算市场可回测(各领域样本不足)。")
+        return "\n".join(lines)
+    cats = list(matrix.keys())
+    header = "| 策略＼领域 | " + " | ".join(f"{c}(n={matrix[c].get('n')})" for c in cats) + " |"
+    lines.append(header)
+    lines.append("|" + "---|" * (len(cats) + 1))
+    for sig in signals:
+        cells = []
+        for c in cats:
+            v = matrix[c]["signals"].get(sig, {})
+            bd = v.get("brier_delta")
+            mark = "✅" if v.get("beats_market") else ""
+            cells.append(f"{bd:+}{mark}" if isinstance(bd, (int, float)) else "—")
+        lines.append(f"| {sig} | " + " | ".join(cells) + " |")
+    winners = a.get("winners") or []
+    if winners:
+        lines.append("\n**跑赢市场的组合**:" + "、".join(f"{s}@{c}" for c, s in winners))
+    else:
+        lines.append("\n**结论**:**没有任何(策略,领域)组合稳定跑赢市场** —— 全域无 alpha(诚实,市场大体有效)。")
+    lines.append("\n_单元格=brier_delta(正=跑赢市场,✅=CI 不含 0 显著)。这些是价格历史技术信号,真 edge 更可能在 microstructure / crypto 套利。_")
     return "\n".join(lines)
 
 
@@ -765,6 +976,10 @@ def _kernel_summary(ctx) -> str:
     numeric result — the controller's takeaway is appended when present."""
     f = ctx.facts
     path = " → ".join(s.capability for s in ctx.trace) or "(no steps)"
+    if "paper_trade" in f:                               # the action taken wins — it's terminal
+        return _format_paper_trade(f["paper_trade"], path)
+    if "settlement" in f:                                # settle + reflect outcome
+        return _format_settlement(f["settlement"], path)
     if "recommendation" in f:                           # Goal-2: topic → recommended target
         out = _format_recommendation(f["recommendation"], path)
         if "market_analysis" in f:                      # controller also deep-analyzed the pick
@@ -772,11 +987,24 @@ def _kernel_summary(ctx) -> str:
         return out
     if "market_analysis" in f:                          # Goal-1 framework IS the grounded answer
         return _format_market_analysis(f["market_analysis"], path)  # no free-text append (avoids hallucinated punditry)
-    # Final analytical deliverables win over intermediate steps (e.g. collections):
+    # Final analytical deliverables win over intermediate steps (e.g. collections).
+    # Focused scans (the pack the user selected) win over the broad hunt_alpha board.
+    if "microstructure" in f:                            # order-flow scan (focused)
+        return _format_microstructure(f["microstructure"], path)
+    if "news_sentiment" in f:                            # news + sentiment signal
+        return _format_news(f["news_sentiment"], path)
+    if "alpha_hunt" in f:                                # top-level opportunity hunt (broad)
+        return _format_alpha_hunt(f["alpha_hunt"], path)
+    if "skill_report" in f:                              # calibration / skill report
+        return _format_skill_report(f["skill_report"], path)
+    if "portfolio_review" in f:                          # paper portfolio + P&L
+        return _format_portfolio(f["portfolio_review"], path)
     if "crypto_arb" in f:                                # cross-market crypto arbitrage scan
         return _format_crypto_arb(f["crypto_arb"], path)
     if "promotion_verdict" in f:                         # Lab promotion gates — paper-ready?
         return _format_promotion(f["promotion_verdict"], path)
+    if "backtest_matrix" in f:                           # strategy × domain matrix
+        return _format_backtest_matrix(f["backtest_matrix"], path)
     if "strategy_comparison" in f:                       # multi-strategy backtest comparison
         return _format_strategy_comparison(f["strategy_comparison"], path)
     if "backtest_report" in f:
@@ -797,11 +1025,13 @@ def _kernel_summary(ctx) -> str:
     return f"**kernel** 无法完成目标 {sorted(ctx.goal.targets)}(路径: {path})。"
 
 
-async def _stream_kernel(history: list[dict], session: "AgentSession") -> AsyncIterator[str]:
+async def _stream_kernel(history: list[dict], session: "AgentSession",
+                         packs: list[str] | None = None) -> AsyncIterator[str]:
     """Kernel mode: the request goes through the ONE kernel loop, which recognises
     intent and takes the minimal capability path (Q&A via ReAct, or data→backtest,
-    …). The prior turns are passed as cross-turn memory. Runs the sync loop in a
-    thread and bridges its ``on_event`` to SSE."""
+    …). The prior turns are passed as cross-turn memory; ``packs`` selects which
+    vertical capability packs are loaded. Runs the sync loop in a thread and bridges
+    its ``on_event`` to SSE."""
     from polyagents.kernel import run_mode
 
     # split the conversation into the current request + the prior turns (memory)
@@ -819,7 +1049,7 @@ async def _stream_kernel(history: list[dict], session: "AgentSession") -> AsyncI
 
     def work() -> None:
         try:
-            ctx = run_mode("kernel", request=last_text, history=prior, on_event=on_event)
+            ctx = run_mode("kernel", request=last_text, history=prior, packs=packs, on_event=on_event)
             loop.call_soon_threadsafe(q.put_nowait, {"type": "_result", "ctx": ctx})
         except Exception as exc:                        # surface, don't crash the stream
             loop.call_soon_threadsafe(q.put_nowait, {"type": "_error", "message": str(exc)})
@@ -864,7 +1094,7 @@ def _chunk_text(text: str, size: int = 24):
 
 async def _stream(history: list[dict], skills: list[str], model: str | None = None,
                   attachments: list[str] | None = None,
-                  mode: str = "auto") -> AsyncIterator[str]:
+                  mode: str = "auto", packs: list[str] | None = None) -> AsyncIterator[str]:
     # The web chat IS the Ask mode: one session decides tools (read-only),
     # permissions and audit. mode → readonly tool subset + audit trail (§八-B/§九).
     session = AgentSession("ask", audit=_audit())
@@ -876,7 +1106,7 @@ async def _stream(history: list[dict], skills: list[str], model: str | None = No
     if mode == "kernel":
         session.log("session.start", model=model, skills=skills,
                     attachments=len(attachments or []))
-        async for ev in _stream_kernel(history, session):
+        async for ev in _stream_kernel(history, session, packs):
             yield ev
         return
     route, by = classify(last_text, manual=(mode if mode in ("domain", "general") else None),
@@ -939,5 +1169,6 @@ async def chat(request: Request) -> StreamingResponse:
     model = body.get("model")
     attachments = body.get("attachments", [])
     mode = body.get("mode", "auto")
-    return StreamingResponse(_stream(history, skills, model, attachments, mode),
+    packs = body.get("packs")                            # kernel: which vertical packs to load (None = all)
+    return StreamingResponse(_stream(history, skills, model, attachments, mode, packs),
                              media_type="text/event-stream")

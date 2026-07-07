@@ -11,10 +11,15 @@ import math
 import re
 
 from .capabilities import (analyze_market_capability, answer_capability,
-                           backtest_capability, backtest_strategies_capability,
+                           backtest_capability, backtest_matrix_capability,
+                           backtest_strategies_capability,
                            batch_backtest_capability, batch_collect_capability,
                            crypto_arb_capability, data_capability,
                            discover_markets_capability, domain_capability,
+                           evaluate_skill_capability, hunt_alpha_capability,
+                           microstructure_scan_capability, news_sentiment_capability,
+                           paper_trade_capability, portfolio_review_capability,
+                           settle_and_reflect_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
                            strategy_capability)
@@ -23,6 +28,25 @@ from .capabilities import (analyze_market_capability, answer_capability,
 def _norm_cdf(x: float) -> float:
     """Standard-normal CDF via erf — for the lognormal crypto-arb probability."""
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _plain_answer(question: str, emit=None) -> str:
+    """No-tools fallback: a plain LLM answer when the ReAct tool-agent errors (e.g. a
+    DeepSeek malformed tool call → 400 'bad parameter'). Keeps the loop answering
+    instead of surfacing a raw API error."""
+    from polyagents.llm import build_chat_llm
+    try:
+        resp = build_chat_llm(temperature=0.2).invoke([
+            ("system", "You are a Polymarket prediction-market research assistant. Answer "
+             "concisely and honestly from general knowledge; if you could not fetch live "
+             "market data, say so briefly in one line."),
+            ("user", question or "")])
+        text = _chunk_text(getattr(resp, "content", resp))
+    except Exception as exc:
+        text = f"(暂时无法完成:{exc})"
+    if emit is not None:
+        emit({"type": "token", "text": text})
+    return text
 
 
 _CX_ASSETS = {"btc": "BTC", "bitcoin": "BTC", "eth": "ETH", "ethereum": "ETH",
@@ -93,7 +117,8 @@ def default_registry() -> list:
     keyword category, then replay a deterministic backtest over them."""
     from polyagents import mcp_server
     from polyagents.evaluation.evaluate import categorize
-    from polyagents.lab.backtest import BacktestRunner, momentum_signal, naive_signal
+    from polyagents.lab.backtest import BacktestRunner
+    from polyagents.strategies import SIGNALS
 
     eng = mcp_server.engine()
 
@@ -111,7 +136,7 @@ def default_registry() -> list:
         return {"event": event, "category": cat, "markets": yes}
 
     def _replay(markets, event=None):
-        out = BacktestRunner(client=eng.client, max_markets=20).replay(
+        out = BacktestRunner(client=eng.client, max_markets=20, store=getattr(eng, "store", None)).replay(
             category=None, markets=markets)
         s = out["summary"]
         return {"event": event, "n_markets": out["n_markets"],
@@ -205,6 +230,115 @@ def default_registry() -> list:
                 "best": opps[0] if opps else None,
                 "barrier_markets": barrier[:cap], "n_barrier": len(barrier)}
 
+    def _flow_signal(m, factors):
+        """Score one market's microstructure/flow: strong one-sided flow+book with an
+        un-moved price = potential edge; wide spread = penalised (untradeable)."""
+        fi = float(factors.get("flow_imbalance", 0.0))      # buy vs sell flow
+        bp = float(factors.get("book_pressure", 0.0))       # bid vs ask depth
+        vs = float(factors.get("volume_spike_ratio", 0.0))  # unusual activity
+        pm = float(factors.get("price_momentum", 0.0))      # has price moved yet
+        spread = float(factors.get("spread_bps", 0.0))
+        mvm = float(factors.get("micro_vs_mid", 0.0))
+        conviction = 0.5 * abs(fi) + 0.3 * abs(bp) + 0.2 * min(vs / 3.0, 1.0)
+        unpriced = 1.0 + max(0.0, 0.15 - abs(pm))           # flow strong but price flat = edge
+        tradeable = spread < 300.0
+        return {"question": m.question, "token_id": m.token_id,
+                "flow_imbalance": round(fi, 3), "book_pressure": round(bp, 3),
+                "volume_spike": round(vs, 2), "price_momentum": round(pm, 3),
+                "spread_bps": round(spread, 0), "micro_vs_mid": round(mvm, 4),
+                "score": round(conviction * unpriced * (1.0 if tradeable else 0.3), 3),
+                "tradeable": tradeable,
+                "lean": "YES(资金买盘占优)" if (fi + bp) > 0 else "NO/谨慎(卖盘占优)"}
+
+    def _scan_flow(rows, cap):
+        out = []
+        for row in rows[:cap]:
+            m = mcp_server._get_market(row.get("token_id", ""))
+            if m is None:
+                continue
+            try:
+                factors = ((eng.collect(m).get("raw", {}) or {}).get("features", {}) or {}).get("factors", {})
+            except Exception:
+                continue
+            out.append(_flow_signal(m, factors))
+        out.sort(key=lambda x: x["score"], reverse=True)
+        return out
+
+    def hunt_alpha(query, n_micro=6):
+        """Top-level opportunity hunt: crypto spot-vs-implied mispricings + microstructure
+        smart-money flow, consolidated and ranked. Deterministic (no LLM), honest."""
+        crypto = (find_crypto_arb(query).get("opportunities") or [])[:5]   # reuse crypto detector
+        flow = _scan_flow(mcp_server.scan_markets(limit=n_micro, min_volume_24h=20000.0), n_micro)
+        return {"query": query, "crypto": crypto, "n_crypto": len(crypto),
+                "flow": flow[:5], "n_flow_scanned": len(flow)}
+
+    # ----- vertical pack capabilities: news-events / microstructure ----------
+
+    def settle_and_reflect(query):
+        """Settle resolved paper trades (book P&L) + Layer-4 reflection (write lessons)."""
+        settled = eng.settle(reflect=True)
+        recs = [{"question": s.get("question"), "won": s.get("won"),
+                 "resolved_winner": s.get("resolved_winner"),
+                 "realized_pnl": s.get("realized_pnl"), "realized_return": s.get("realized_return"),
+                 "lesson": s.get("lesson")} for s in settled]
+        return {"n_settled": len(recs), "settled": recs,
+                "portfolio": mcp_server.portfolio_status()}
+
+    def paper_trade(market_ref):
+        """Analyse a market, take the deterministic sized decision, and paper-execute if
+        it's actionable (buy/sell). Paper money, through the circuit breaker."""
+        ref = market_ref or {}
+        m = mcp_server._get_market(ref.get("token_id", "")) if ref.get("token_id") else None
+        if m is None:
+            return {"error": f"market not found: {ref}"}
+        core = _analysis_core(m)
+        sig, dec = core["signal"], core["decision"]
+        if dec is None:
+            return {"market": {"question": m.question, "price": m.price},
+                    "action": "hold", "executed": False, "note": "no decision",
+                    "portfolio": mcp_server.portfolio_status()}
+        result, executed = None, False
+        if dec.action in ("buy", "sell") and dec.size_usdc > 0:
+            result = mcp_server.paper_execute(m.token_id, dec.action, round(dec.size_usdc, 2))
+            executed = result.get("status") == "filled"
+        return {
+            "market": {"question": m.question, "token_id": m.token_id, "price": round(m.price, 4)},
+            "action": dec.action, "p_true": round(sig.p_true, 3) if sig is not None else None,
+            "edge": round(dec.edge, 4), "size_usdc": round(dec.size_usdc, 2),
+            "reasons": dec.reasons, "executed": executed, "result": result,
+            "portfolio": mcp_server.portfolio_status(),
+        }
+
+    def evaluate_skill(query):
+        return {"report": mcp_server.evaluation_report()}
+
+    def portfolio_review(query):
+        return {"portfolio": mcp_server.portfolio_status(), "pnl": mcp_server.pnl_report()}
+
+    def news_sentiment(query):
+        nc = eng.news_client
+        if not getattr(nc, "enabled", False):
+            return {"query": query, "enabled": False,
+                    "note": "新闻/情绪需要 TAVILY_API_KEY(.env),当前未配置"}
+        items = nc.search(query or "", max_results=6)
+        scored = []
+        for it in items:
+            s = eng.scorer.score(f"{getattr(it, 'title', '')} {getattr(it, 'snippet', '')}")
+            scored.append({"title": getattr(it, "title", ""), "url": getattr(it, "url", ""),
+                           "sentiment": round(float(s), 3)})
+        mean = round(sum(x["sentiment"] for x in scored) / len(scored), 3) if scored else 0.0
+        signal = "偏多" if mean > 0.1 else ("偏空" if mean < -0.1 else "中性")
+        return {"query": query, "enabled": True, "n_items": len(scored),
+                "mean_sentiment": mean, "signal": signal, "items": scored}
+
+    def microstructure_scan(query, n=10):
+        cat = categorize(query or "")
+        rows = mcp_server.scan_markets(limit=30, min_volume_24h=10000.0)
+        if cat != "other":                              # narrow to the request's domain if any
+            rows = [r for r in rows if categorize(r.get("question", "")) == cat] or rows
+        ranked = _scan_flow(rows, n)
+        return {"query": query, "category": cat, "n_scanned": len(ranked), "markets": ranked[:8]}
+
     def promotion_gate(query):
         """loop→Lab bridge: backtest each strategy over the domain, then run Lab's
         promotion gates (sample / beats-market / ECE / PIT) → is any PAPER-READY?"""
@@ -218,8 +352,8 @@ def default_registry() -> list:
             return {"domain": cat, "n": 0, "strategies": [], "paper_ready": False,
                     "note": "no resolved markets to evaluate"}
         strategies = []
-        for name, fn in (("naive", naive_signal), ("momentum", momentum_signal)):
-            recs = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn).replay(
+        for name, fn in SIGNALS.items():
+            recs = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn, store=getattr(eng, "store", None)).replay(
                 markets=yes)["records"]
             if not recs:
                 strategies.append({"signal": name, "n": 0, "gates": {}, "paper_ready": False})
@@ -238,6 +372,58 @@ def default_registry() -> list:
                 "strategies": strategies,
                 "paper_ready": any(s.get("paper_ready") for s in strategies)}
 
+    def _multi_score(markets, cap=12):
+        """Score EVERY signal on the same PIT candle slice per market (one price-history
+        fetch per market, not one per signal) → per-signal alpha summaries. Mirrors
+        BacktestRunner._score_market's point-in-time setup, and reads candles
+        store-first (live only as fallback) via a shared runner."""
+        from polyagents.evaluation.alpha import alpha_test
+        runner = BacktestRunner(client=eng.client, store=getattr(eng, "store", None))
+        per = {name: [] for name in SIGNALS}
+        scored = 0
+        for m in markets:
+            if scored >= cap:
+                break
+            if not (m.price <= 0.05 or m.price >= 0.95):        # same extreme-price filter
+                continue
+            won = m.price >= 0.5
+            candles = runner.candles_for(m)
+            if len(candles) < 5:
+                continue
+            idx = min(max(int(0.5 * len(candles)), 4), len(candles) - 1)
+            pit = [c for c in candles[:idx] if c.ts < candles[idx].ts]
+            if len(pit) < 4:
+                continue
+            market_p = pit[-1].close
+            if not (0.02 < market_p < 0.98):
+                continue
+            for name, fn in SIGNALS.items():
+                per[name].append({"status": "resolved", "won": won,
+                                  "p_true": float(fn(pit, market_p)),
+                                  "market_price": market_p, "question": m.question})
+            scored += 1
+        return {name: alpha_test(recs) for name, recs in per.items()}, scored
+
+    def backtest_matrix(query, cap=12):
+        """Strategy × domain matrix: every signal over every category's resolved markets,
+        one consolidated board of which (if any) combos beat the market."""
+        raw = eng.client.list_resolved_markets(limit=120)
+        all_yes = [m for m in eng.client.to_markets(raw) if m.outcome == "YES"]
+        matrix = {}
+        for cat in ("crypto", "sports", "politics", "economy", "other"):
+            yes = [m for m in all_yes if categorize(m.question) == cat]
+            if not yes:
+                continue
+            summaries, n = _multi_score(yes, cap)
+            if n == 0:
+                continue
+            matrix[cat] = {"n": n, "signals": {
+                name: {"brier_delta": round(s.brier_delta, 4), "beats_market": s.beats_market}
+                for name, s in summaries.items()}}
+        winners = [(cat, sig) for cat, row in matrix.items()
+                   for sig, v in row["signals"].items() if v["beats_market"]]
+        return {"query": query, "signals": list(SIGNALS), "matrix": matrix, "winners": winners}
+
     def backtest_strategies(query):
         """Run every built-in strategy signal over the domain's resolved markets and
         compare — which (if any) beats the market."""
@@ -250,8 +436,8 @@ def default_registry() -> list:
             return {"domain": cat, "n_markets": 0, "strategies": [], "best": None,
                     "note": "no resolved markets to backtest"}
         strategies = []
-        for name, fn in (("naive", naive_signal), ("momentum", momentum_signal)):
-            out = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn).replay(
+        for name, fn in SIGNALS.items():
+            out = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn, store=getattr(eng, "store", None)).replay(
                 category=None, markets=yes)
             s = out["summary"]
             strategies.append({"name": name, "n_markets": out["n_markets"],
@@ -432,21 +618,33 @@ def default_registry() -> list:
 
     def answer(question):                              # general / web-search agent
         from polyagents.web.agent import build_general_agent
-        return _last_content(build_general_agent().invoke(
-            {"messages": [("user", question or "")]}))
+        try:
+            return _last_content(build_general_agent().invoke(
+                {"messages": [("user", question or "")]}))
+        except Exception:                              # tool-call/API error → no-tools fallback
+            return _plain_answer(question)
 
     def answer_stream(question, emit):
         from polyagents.web.agent import build_general_agent
-        return _stream_agent(build_general_agent(), question, emit)
+        try:
+            return _stream_agent(build_general_agent(), question, emit)
+        except Exception:
+            return _plain_answer(question, emit)
 
     def domain_answer(question):                       # read-only market-tools agent
         from polyagents.web.agent import build_agent
-        return _last_content(build_agent(readonly=True).invoke(
-            {"messages": [("user", question or "")]}))
+        try:
+            return _last_content(build_agent(readonly=True).invoke(
+                {"messages": [("user", question or "")]}))
+        except Exception:
+            return _plain_answer(question)
 
     def domain_stream(question, emit):
         from polyagents.web.agent import build_agent
-        return _stream_agent(build_agent(readonly=True), question, emit)
+        try:
+            return _stream_agent(build_agent(readonly=True), question, emit)
+        except Exception:                              # DeepSeek bad tool-call → graceful text
+            return _plain_answer(question, emit)
 
     def run_strategy(market):
         from polyagents.orchestration import run_strategy as _rs
@@ -460,8 +658,16 @@ def default_registry() -> list:
         batch_collect_capability(batch_collect),
         batch_backtest_capability(batch_backtest),
         backtest_strategies_capability(backtest_strategies),
+        backtest_matrix_capability(backtest_matrix),
         promotion_gate_capability(promotion_gate),
         crypto_arb_capability(find_crypto_arb),
+        hunt_alpha_capability(hunt_alpha),
+        evaluate_skill_capability(evaluate_skill),
+        portfolio_review_capability(portfolio_review),
+        paper_trade_capability(paper_trade),
+        settle_and_reflect_capability(settle_and_reflect),
+        news_sentiment_capability(news_sentiment),
+        microstructure_scan_capability(microstructure_scan),
         resolve_market_capability(resolve),
         analyze_market_capability(analyze_market),
         discover_markets_capability(discover),
