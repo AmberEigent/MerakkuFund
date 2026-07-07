@@ -117,11 +117,37 @@ class BacktestRunner:
             yes = [m for m in yes if categorize(m.question) == category]
         return yes
 
+    def _data_store(self):
+        """The Layer-1 DataStore, if one is wired (distinct from the LabRepository).
+
+        Detected by the ``get_candles`` read method so we never mistake the Lab
+        repo (which has no candle history) for a data cache."""
+        store = self.store
+        return store if store is not None and hasattr(store, "get_candles") else None
+
+    def candles_for(self, market) -> list:
+        """Point-in-time candle history, **store-first**: read the persisted cache
+        and only hit the live API when the store lacks enough history. A live fetch
+        is written through so the cache accumulates and later runs stay offline."""
+        store = self._data_store()
+        need = self.min_history + 1
+        if store is not None:
+            cached = store.get_candles(market.token_id)
+            if len(cached) >= need:
+                return cached
+        candles = self.client.fetch_price_history(market.token_id, interval="max") if self.client else []
+        if candles and store is not None:
+            try:
+                store.upsert_candles(market.token_id, candles)     # write-through
+            except Exception:
+                pass
+        return candles
+
     def _score_market(self, market) -> dict | None:
         if not (market.price <= 0.05 or market.price >= 0.95):
             return None
         won = market.price >= 0.5
-        candles = self.client.fetch_price_history(market.token_id, interval="max")
+        candles = self.candles_for(market)
         n = len(candles)
         if n < self.min_history + 1:
             return None

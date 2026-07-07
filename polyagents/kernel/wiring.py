@@ -136,7 +136,7 @@ def default_registry() -> list:
         return {"event": event, "category": cat, "markets": yes}
 
     def _replay(markets, event=None):
-        out = BacktestRunner(client=eng.client, max_markets=20).replay(
+        out = BacktestRunner(client=eng.client, max_markets=20, store=getattr(eng, "store", None)).replay(
             category=None, markets=markets)
         s = out["summary"]
         return {"event": event, "n_markets": out["n_markets"],
@@ -353,7 +353,7 @@ def default_registry() -> list:
                     "note": "no resolved markets to evaluate"}
         strategies = []
         for name, fn in SIGNALS.items():
-            recs = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn).replay(
+            recs = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn, store=getattr(eng, "store", None)).replay(
                 markets=yes)["records"]
             if not recs:
                 strategies.append({"signal": name, "n": 0, "gates": {}, "paper_ready": False})
@@ -375,8 +375,10 @@ def default_registry() -> list:
     def _multi_score(markets, cap=12):
         """Score EVERY signal on the same PIT candle slice per market (one price-history
         fetch per market, not one per signal) → per-signal alpha summaries. Mirrors
-        BacktestRunner._score_market's point-in-time setup."""
+        BacktestRunner._score_market's point-in-time setup, and reads candles
+        store-first (live only as fallback) via a shared runner."""
         from polyagents.evaluation.alpha import alpha_test
+        runner = BacktestRunner(client=eng.client, store=getattr(eng, "store", None))
         per = {name: [] for name in SIGNALS}
         scored = 0
         for m in markets:
@@ -385,7 +387,7 @@ def default_registry() -> list:
             if not (m.price <= 0.05 or m.price >= 0.95):        # same extreme-price filter
                 continue
             won = m.price >= 0.5
-            candles = eng.client.fetch_price_history(m.token_id, interval="max")
+            candles = runner.candles_for(m)
             if len(candles) < 5:
                 continue
             idx = min(max(int(0.5 * len(candles)), 4), len(candles) - 1)
@@ -435,7 +437,7 @@ def default_registry() -> list:
                     "note": "no resolved markets to backtest"}
         strategies = []
         for name, fn in SIGNALS.items():
-            out = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn).replay(
+            out = BacktestRunner(client=eng.client, max_markets=20, signal_fn=fn, store=getattr(eng, "store", None)).replay(
                 category=None, markets=yes)
             s = out["summary"]
             strategies.append({"name": name, "n_markets": out["n_markets"],
