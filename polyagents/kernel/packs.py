@@ -10,7 +10,8 @@ from __future__ import annotations
 
 #: Always loaded — everyday research / analysis / recommendation / Q&A / opportunity hunt.
 CORE: list[str] = [
-    "hunt_alpha",                                       # top-level opportunity scan
+    "hunt_alpha",                                       # top-level opportunity scan (edge detectors)
+    "scan_opportunities",                              # Lab monitor: strategy-scored actionable trades
     "scan_markets", "resolve_market", "analyze_market",
     "discover_markets", "recommend_markets",
     "evaluate_skill", "portfolio_review",              # do we have skill? / paper P&L

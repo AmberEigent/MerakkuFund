@@ -255,6 +255,24 @@ def hunt_alpha_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"alpha_hunt"}), run, cost=5)
 
 
+def scan_opportunities_capability(fn: Callable) -> Capability:
+    """Dry-run opportunity monitor — score live markets with a Lab strategy and rank
+    actionable trades (Lab's ``LabMonitor.scan``). ``fn(query) -> dict`` builds a live
+    read-only feature bundle per active market, scores it with the strategy's factor
+    model, sizes a paper position through the risk gate, and returns a ranked board of
+    (action, edge, size) — always dry-run. This is the Ask-side 'what's actually worth
+    trading right now' scan, backed by the Lab strategy library."""
+    def run(ctx: Context) -> dict:
+        return {"opportunities": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("scan_opportunities",
+                      "Scan live active markets with a Lab strategy and rank concrete, "
+                      "actionable DRY-RUN trades — each with action (buy/sell/hold), edge, "
+                      "sized paper position, and reasons. Use for 'what should I trade now', "
+                      "'scan for trade signals / opportunities to buy', 'run the monitor'. "
+                      "(Read-only, no orders; the strategy-scored complement to hunt_alpha.)",
+                      frozenset({"question"}), frozenset({"opportunities"}), run, cost=6)
+
+
 def crypto_arb_capability(fn: Callable) -> Capability:
     """Cross-market crypto arbitrage — the cross-market-arb strategy as a loop capability.
 

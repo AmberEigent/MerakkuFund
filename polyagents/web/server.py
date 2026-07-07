@@ -824,6 +824,32 @@ def _format_alpha_hunt(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+def _format_opportunities(a: dict, path: str) -> str:
+    """Render the Lab opportunity monitor: strategy-scored, ranked dry-run trades."""
+    opps = a.get("opportunities") or []
+    lines = [f"**机会监控 · scan_opportunities** · {path}", "",
+             f"_策略:{a.get('strategy_id', '—')} · 主题:{a.get('query')} · dry-run(不下单)_"]
+    if a.get("error"):
+        lines.append(f"\n扫描失败:{a['error']}")
+        return "\n".join(lines)
+    if not opps:
+        lines.append(f"\n{a.get('message') or '当前无可执行机会'} —— 没有市场越过 edge/风控门槛。这是常态,不是失败。")
+        return "\n".join(lines)
+    lines.append(f"\n扫到 **{a.get('n', len(opps))}** 个可执行机会(按 buy 优先 + edge 排序):")
+    lines.append("\n| 市场 | 动作 | edge | 建议仓位 | 模型p | 市场价 | APY |")
+    lines.append("|---|---|---|---|---|---|---|")
+    for o in opps:
+        lines.append(f"| {(o.get('question') or '')[:30]} | **{o.get('action')}** | "
+                     f"{o.get('edge'):+.4f} | ${o.get('size_usdc'):.0f} | {o.get('p_cal'):.3f} | "
+                     f"{o.get('market_price'):.3f} | {o.get('apy'):+.2f} |")
+    top = opps[0]
+    if top.get("reasons"):
+        lines.append(f"\n**Top({(top.get('question') or '')[:40]})依据**:" + "；".join(str(x) for x in top["reasons"][:3]))
+    lines.append("\n_LabMonitor 打分:每个市场取 live 特征 → 策略因子模型出 p → 过 Kelly/风控给仓位。**dry-run,信号非确定性**。"
+                 "想深挖某个 → analyze_market;想验证该策略历史 → backtest_strategies / promotion_gate。_")
+    return "\n".join(lines)
+
+
 def _format_crypto_arb(a: dict, path: str) -> str:
     """Render the crypto cross-market arbitrage scan (spot vs implied probability)."""
     opps = a.get("opportunities") or []
@@ -993,6 +1019,8 @@ def _kernel_summary(ctx) -> str:
         return _format_microstructure(f["microstructure"], path)
     if "news_sentiment" in f:                            # news + sentiment signal
         return _format_news(f["news_sentiment"], path)
+    if "opportunities" in f:                             # Lab monitor: strategy-scored actionable trades
+        return _format_opportunities(f["opportunities"], path)
     if "alpha_hunt" in f:                                # top-level opportunity hunt (broad)
         return _format_alpha_hunt(f["alpha_hunt"], path)
     if "skill_report" in f:                              # calibration / skill report

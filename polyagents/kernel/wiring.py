@@ -22,7 +22,7 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            settle_and_reflect_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
-                           strategy_capability)
+                           scan_opportunities_capability, strategy_capability)
 
 
 def _norm_cdf(x: float) -> float:
@@ -271,6 +271,27 @@ def default_registry() -> list:
         flow = _scan_flow(mcp_server.scan_markets(limit=n_micro, min_volume_24h=20000.0), n_micro)
         return {"query": query, "crypto": crypto, "n_crypto": len(crypto),
                 "flow": flow[:5], "n_flow_scanned": len(flow)}
+
+    def scan_opportunities(query, limit=12):
+        """Dry-run opportunity monitor (colleague's Lab LabMonitor), driven from Ask:
+        score live active markets with a Lab strategy and rank actionable trades."""
+        from polyagents.lab.monitor import LabMonitor, MonitorRequest
+        from polyagents.lab.strategies import STRATEGIES
+        q = (query or "").lower()
+        # match a named Lab strategy by keyword vs its versioned id (momentum→momentum-v1),
+        # else fall back to the default factor model
+        chosen = next((sid for sid in STRATEGIES
+                       if any(len(w) >= 4 and w in sid for w in q.split())), None)
+        req_kw = {"limit": limit, "include_holds": False}   # Ask wants actionable ideas
+        if chosen:
+            req_kw["strategy_id"] = chosen
+        try:
+            monitor = LabMonitor(client=eng.client, config=eng.config)
+            out = monitor.scan(MonitorRequest(**req_kw))
+        except Exception as exc:                            # degrade honestly, never fabricate
+            return {"query": query, "n": 0, "opportunities": [],
+                    "error": f"{type(exc).__name__}: {exc}"}
+        return {"query": query, **out}
 
     # ----- vertical pack capabilities: news-events / microstructure ----------
 
@@ -662,6 +683,7 @@ def default_registry() -> list:
         promotion_gate_capability(promotion_gate),
         crypto_arb_capability(find_crypto_arb),
         hunt_alpha_capability(hunt_alpha),
+        scan_opportunities_capability(scan_opportunities),
         evaluate_skill_capability(evaluate_skill),
         portfolio_review_capability(portfolio_review),
         paper_trade_capability(paper_trade),
