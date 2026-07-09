@@ -101,6 +101,12 @@ Times:
 optional market/category scope; ingestion and strategy backtests detect which
 features are actually available from PIT-safe `DataStore.collections`.
 
+Historical news sentiment is also system-owned. Ingestion may query a news API
+with a historical date window, but a news item is admitted into real backtests
+only when it has a parseable publish timestamp whose conservative
+`available_at <= prediction_time`. Undated items and future-dated items are
+skipped and counted in ingestion stats.
+
 Valid states for MVP:
 
 - `draft`

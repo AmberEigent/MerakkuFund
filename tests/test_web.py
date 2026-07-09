@@ -109,6 +109,7 @@ def test_lab_ui_uses_lab_api_contract():
         assert strategy_id in html
     assert "labFetchJson('/api/lab/data/status')" in html
     assert "labFetchJson('/api/lab/data/ingest'" in html
+    assert "news_items_skipped_future" in html
     assert "labFetchJson('/api/lab/monitor/opportunities'" in html
     assert "dry_run=true" in html
     assert "function labFetchJson" in html
