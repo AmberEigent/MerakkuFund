@@ -273,6 +273,23 @@ def scan_opportunities_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"opportunities"}), run, cost=6)
 
 
+def plot_market_capability(fn: Callable) -> Capability:
+    """Visualize market data as a chart (core, always-on).
+
+    ``fn(query) -> dict`` picks the chart type + target from the request and returns a
+    chart spec (series of points / bars) that the web layer renders as an inline SVG —
+    price trend over time (line / area), several markets compared (multi-line), or a
+    snapshot bar chart of current prices."""
+    def run(ctx: Context) -> dict:
+        return {"chart": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("plot_market",
+                      "Draw a CHART of market data as an inline SVG: a market's price trend "
+                      "over time (line/area), several markets compared (multi-line), or a bar "
+                      "chart of current prices. Use for 'plot / chart / visualize / 画图 / "
+                      "画出…的价格走势 / 走势图 / 把…可视化 / 对比…的走势'. Renders a picture, not a table.",
+                      frozenset({"question"}), frozenset({"chart"}), run, cost=3)
+
+
 def backfill_outcomes_capability(fn: Callable) -> Capability:
     """Label stored market snapshots with their realised outcome (pack: lab-backtest).
 

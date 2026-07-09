@@ -22,6 +22,7 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            microstructure_scan_capability, news_sentiment_capability,
                            paper_trade_capability, portfolio_review_capability,
                            settle_and_reflect_capability,
+                           plot_market_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
                            scan_opportunities_capability, strategy_capability)
@@ -742,6 +743,61 @@ def default_registry() -> list:
         bb = _rs(market, graph=eng, config=eng.config, strategy="full")
         return bb.risk
 
+    # ----- visualization: build a chart spec (rendered to SVG by the web layer) --
+
+    def _price_series(token_id, label, cap=140):
+        """A downsampled (ts, close) price series for one market token."""
+        candles = eng.client.fetch_price_history(token_id, interval="max") or []
+        pts = [[c.ts.isoformat(), round(float(c.close), 4)] for c in candles]
+        if len(pts) > cap:                                  # even downsample to keep the SVG light
+            step = len(pts) / cap
+            pts = [pts[int(i * step)] for i in range(cap)]
+        return {"label": label, "points": pts}
+
+    def plot_market(query):
+        """Pick chart type + target from the request and return a chart spec:
+        line/area (one market's price trend), multi (compare several), or bar
+        (snapshot of current prices)."""
+        q = (query or "").lower()
+        if any(w in q for w in ("对比", "比较", "compare", "versus", " vs ")):
+            ctype = "multi"
+        elif any(w in q for w in ("柱", "bar", "直方")):
+            ctype = "bar"
+        elif any(w in q for w in ("面积", "area")):
+            ctype = "area"
+        else:
+            ctype = "line"
+
+        if ctype in ("line", "area"):
+            r = resolve(query)
+            if r.get("error"):
+                return {"type": ctype, "query": query, "error": r["error"], "series": []}
+            s = _price_series(r["token_id"], r.get("question") or "market")
+            if not s["points"]:
+                return {"type": ctype, "query": query, "title": r.get("question"),
+                        "series": [], "error": "该市场无价格历史"}
+            return {"type": ctype, "query": query, "title": r.get("question"),
+                    "y_label": "price", "series": [s]}
+
+        cands = (discover(query).get("markets") or [])
+        if ctype == "bar":
+            bars = [{"label": (c.get("question") or "")[:22],
+                     "value": round(float(c.get("price") or 0.0), 4)} for c in cands[:8]]
+            return {"type": "bar", "query": query, "title": f"当前价格快照:{query}",
+                    "y_label": "price", "bars": bars,
+                    **({"error": "没找到相关市场"} if not bars else {})}
+        # multi: compare several markets' price trends
+        series = []
+        for c in cands[:4]:
+            if not c.get("token_id"):
+                continue
+            s = _price_series(c["token_id"], (c.get("question") or "")[:26])
+            if s["points"]:
+                series.append(s)
+        return {"type": "multi", "query": query, "title": f"价格走势对比:{query}",
+                "y_label": "price", "series": series,
+                **({"error": "没找到可对比的市场"} if not series else {})}
+
     return [
         data_capability(fetch),
         backtest_capability(backtest),
@@ -754,6 +810,7 @@ def default_registry() -> list:
         crypto_arb_capability(find_crypto_arb),
         hunt_alpha_capability(hunt_alpha),
         scan_opportunities_capability(scan_opportunities),
+        plot_market_capability(plot_market),
         backfill_outcomes_capability(backfill_outcomes),
         lab_backtest_capability(lab_backtest),
         evaluate_skill_capability(evaluate_skill),

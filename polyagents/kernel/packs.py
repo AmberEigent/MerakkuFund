@@ -14,6 +14,7 @@ CORE: list[str] = [
     "scan_opportunities",                              # Lab monitor: strategy-scored actionable trades
     "scan_markets", "resolve_market", "analyze_market",
     "discover_markets", "recommend_markets",
+    "plot_market",                                     # visualize as an inline SVG chart
     "evaluate_skill", "portfolio_review",              # do we have skill? / paper P&L
     "langgraph_answer", "domain_answer",
 ]

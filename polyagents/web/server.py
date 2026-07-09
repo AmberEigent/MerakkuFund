@@ -824,6 +824,117 @@ def _format_alpha_hunt(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+_CHART_COLORS = ["#7dab7d", "#c9ae62", "#c98276", "#9fb9d6", "#b48ead", "#83b6b6"]
+
+
+def _svg_esc(s) -> str:
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _render_svg_chart(spec: dict) -> str:
+    """Self-contained inline SVG for a chart spec (line / area / multi / bar).
+    Styled for the warm-dark chat bubble; responsive via width:100%."""
+    W, H = 680, 300
+    L, R, T, B = 48, 16, 24, 52
+    pw, ph = W - L - R, H - T - B
+    ctype = spec.get("type", "line")
+    grid, txt = "rgba(255,255,255,.09)", "#aea69c"
+    out = [f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" '
+           f'role="img" style="width:100%;height:auto;font-family:Inter,system-ui,sans-serif">']
+    if spec.get("title"):
+        out.append(f'<text x="{L}" y="15" fill="#dad2c1" font-size="12" font-weight="600">'
+                   f'{_svg_esc(str(spec["title"])[:64])}</text>')
+
+    def _empty(msg: str) -> str:
+        out.append(f'<text x="{L}" y="{T + ph / 2:.0f}" fill="{txt}" font-size="12">{_svg_esc(msg)}</text>')
+        out.append("</svg>")
+        return "".join(out)
+
+    if ctype == "bar":
+        bars = spec.get("bars") or []
+        if not bars:
+            return _empty(spec.get("error") or "无数据")
+        vmax = (max((b["value"] for b in bars), default=1.0) or 1.0) * 1.15
+        n, gap = len(bars), 10
+        bw = (pw - gap * (n - 1)) / n
+        for i in range(4):
+            gy = T + ph * i / 3
+            out.append(f'<line x1="{L}" y1="{gy:.1f}" x2="{W - R}" y2="{gy:.1f}" stroke="{grid}"/>')
+            out.append(f'<text x="{L - 6}" y="{gy + 3:.1f}" fill="{txt}" font-size="9" '
+                       f'text-anchor="end">{vmax * (1 - i / 3):.2f}</text>')
+        for i, b in enumerate(bars):
+            x = L + i * (bw + gap)
+            bh = ph * (b["value"] / vmax)
+            y = T + ph - bh
+            out.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{bh:.1f}" '
+                       f'rx="2" fill="{_CHART_COLORS[i % 6]}"/>')
+            out.append(f'<text x="{x + bw / 2:.1f}" y="{y - 3:.1f}" fill="#dad2c1" font-size="9" '
+                       f'text-anchor="middle">{b["value"]:.3f}</text>')
+            out.append(f'<text x="{x + bw / 2:.1f}" y="{T + ph + 13:.1f}" fill="{txt}" font-size="8" '
+                       f'text-anchor="middle">{_svg_esc(str(b["label"])[:12])}</text>')
+        out.append("</svg>")
+        return "".join(out)
+
+    # ---- time-series: line / area / multi ----
+    series = [s for s in (spec.get("series") or []) if s.get("points")]
+    if not series:
+        return _empty(spec.get("error") or "无价格历史")
+    ys = [p[1] for s in series for p in s["points"]]
+    ymin, ymax = min(ys), max(ys)
+    if ymax - ymin < 1e-6:
+        ymax = ymin + 0.01
+    padv = (ymax - ymin) * 0.08
+    ymin, ymax = ymin - padv, ymax + padv
+
+    def _x(i, n):
+        return L + pw * (i / (n - 1) if n > 1 else 0)
+
+    def _y(v):
+        return T + ph * (1 - (v - ymin) / (ymax - ymin))
+
+    for i in range(4):
+        gy = T + ph * i / 3
+        out.append(f'<line x1="{L}" y1="{gy:.1f}" x2="{W - R}" y2="{gy:.1f}" stroke="{grid}"/>')
+        out.append(f'<text x="{L - 6}" y="{gy + 3:.1f}" fill="{txt}" font-size="9" '
+                   f'text-anchor="end">{ymax - (ymax - ymin) * i / 3:.3f}</text>')
+    p_first = str(series[0]["points"][0][0])[:10]
+    p_last = str(series[0]["points"][-1][0])[:10]
+    out.append(f'<text x="{L}" y="{T + ph + 14:.0f}" fill="{txt}" font-size="9">{p_first}</text>')
+    out.append(f'<text x="{W - R}" y="{T + ph + 14:.0f}" fill="{txt}" font-size="9" text-anchor="end">{p_last}</text>')
+    for si, s in enumerate(series):
+        col = _CHART_COLORS[si % 6]
+        pts = s["points"]
+        n = len(pts)
+        d = " ".join(f'{_x(i, n):.1f},{_y(p[1]):.1f}' for i, p in enumerate(pts))
+        if ctype == "area" and len(series) == 1:
+            out.append(f'<polygon points="{_x(0, n):.1f},{T + ph:.1f} {d} {_x(n - 1, n):.1f},{T + ph:.1f}" '
+                       f'fill="{col}" fill-opacity="0.15"/>')
+        out.append(f'<polyline points="{d}" fill="none" stroke="{col}" stroke-width="1.6"/>')
+    if len(series) > 1:                                      # legend row for multi
+        lx = L
+        for si, s in enumerate(series):
+            out.append(f'<rect x="{lx:.0f}" y="{H - 14}" width="9" height="9" rx="2" fill="{_CHART_COLORS[si % 6]}"/>')
+            lab = str(s["label"])[:16]
+            out.append(f'<text x="{lx + 12:.0f}" y="{H - 6}" fill="{txt}" font-size="9">{_svg_esc(lab)}</text>')
+            lx += 20 + len(lab) * 5.6
+    out.append("</svg>")
+    return "".join(out)
+
+
+def _format_chart(a: dict, path: str) -> str:
+    """Render a chart spec as a titled inline SVG (passed through the md renderer)."""
+    label = {"line": "价格走势", "area": "价格走势", "multi": "走势对比", "bar": "价格快照"}.get(a.get("type"), "图表")
+    lines = [f"**{label} · plot_market** · {path}", ""]
+    if a.get("error") and not (a.get("series") or a.get("bars")):
+        lines.append(f"画图失败:{a['error']}")
+        return "\n".join(lines)
+    lines.append("```svg")                                  # svg fence → md renderer emits it raw
+    lines.append(_render_svg_chart(a))
+    lines.append("```")
+    lines.append(f"\n_数据来自价格历史(只读)。图型:{a.get('type')}。想换类型就说'柱状图/面积图/对比走势';想深挖 → analyze_market。_")
+    return "\n".join(lines)
+
+
 def _format_backfill(a: dict, path: str) -> str:
     """Render the outcome-backfill: how many stored snapshots got labelled."""
     if a.get("error"):
@@ -1071,6 +1182,8 @@ def _kernel_summary(ctx) -> str:
     # Focused scans (the pack the user selected) win over the broad hunt_alpha board.
     if "microstructure" in f:                            # order-flow scan (focused)
         return _format_microstructure(f["microstructure"], path)
+    if "chart" in f:                                     # explicit visualization request
+        return _format_chart(f["chart"], path)
     if "news_sentiment" in f:                            # news + sentiment signal
         return _format_news(f["news_sentiment"], path)
     if "opportunities" in f:                             # Lab monitor: strategy-scored actionable trades

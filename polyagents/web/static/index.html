@@ -117,6 +117,9 @@
   .bubble.md pre{background:var(--tool);border:1px solid var(--toolline);border-radius:8px;padding:11px 13px;
        overflow-x:auto;margin:.6em 0}
   .bubble.md pre code{background:none;border:0;padding:0;font-size:12px;line-height:1.5;white-space:pre}
+  .bubble.md .md-chart{margin:.6em 0;border:1px solid var(--hairline);border-radius:8px;
+       background:var(--canvas);padding:10px 12px;overflow-x:auto}
+  .bubble.md .md-chart svg{display:block;max-width:100%;height:auto}
   .bubble.md ul{margin:.5em 0;padding-left:20px} .bubble.md li{margin:.25em 0}
   .bubble.md .md-tbl{border-collapse:collapse;width:100%;margin:.7em 0;font-size:12.5px;display:block;overflow-x:auto}
   .bubble.md .md-tbl th{text-align:left;color:var(--mute);font-weight:500;font-size:11px;text-transform:uppercase;
@@ -1198,10 +1201,14 @@ function renderMd(src){
   const cells = r => r.replace(/^\s*\|/,'').replace(/\|\s*$/,'').split('|').map(c=>c.trim());
   while(i<L.length){
     const line=L[i];
-    if(/^\s*```/.test(line)){                                   // fenced code
-      const code=[]; i++;
+    const fence=line.match(/^\s*```\s*([a-zA-Z0-9_-]+)?/);
+    if(fence){                                                  // fenced code (or ```svg chart)
+      const lang=(fence[1]||'').toLowerCase(); const code=[]; i++;
       while(i<L.length && !/^\s*```/.test(L[i])){ code.push(L[i]); i++; }
-      i++; out+='<pre><code>'+esc(code.join('\n'))+'</code></pre>'; continue;
+      i++;
+      if(lang==='svg') out+='<div class="md-chart">'+code.join('\n')+'</div>';  // server-built SVG, raw
+      else out+='<pre><code>'+esc(code.join('\n'))+'</code></pre>';
+      continue;
     }
     if(isTblHead(i)){                                           // pipe table
       out+='<table class="md-tbl"><thead><tr>'+cells(line).map(c=>'<th>'+mdInline(c)+'</th>').join('')+'</tr></thead><tbody>';
