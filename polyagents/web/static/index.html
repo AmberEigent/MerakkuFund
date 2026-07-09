@@ -1671,9 +1671,15 @@ function renderLabReport(rep){
   const sample=(rep.market_sample||[]).slice(0,5).map(x=>{
     const ne=x.news_evidence||{};
     const first=(ne.items&&ne.items[0])||null;
-    const newsLine = ne.source
-      ? `\n  news: ${ne.n_items||0} used · sentiment=${Number(ne.mean_sentiment||0).toFixed(3)} ${ne.label||'neutral'} · skipped_future=${ne.skipped_future||0} · skipped_undated=${ne.skipped_no_published||0}${first?`\n  headline: ${(first.title||'').slice(0,110)}`:''}`
-      : '';
+    let newsLine = '';
+    if(ne.source){
+      const source = ne.source === 'unavailable' || ne.source === 'unknown'
+        ? 'unavailable'
+        : ne.source;
+      newsLine = `\n  news: ${ne.n_items||0} used · ${source} · sentiment=${Number(ne.mean_sentiment||0).toFixed(3)} ${ne.label||'neutral'} · skipped_future=${ne.skipped_future||0} · skipped_undated=${ne.skipped_no_published||0}${first?`\n  headline: ${(first.title||'').slice(0,110)}`:''}`;
+    }else{
+      newsLine = '\n  news: not recorded in this report · rerun ingestion/backtest to populate PIT news evidence';
+    }
     return `${x.market_token_id}: p_cal=${Number(x.p_cal).toFixed(3)} market=${Number(x.p_market).toFixed(3)} outcome=${x.outcome} Δ=${Number(x.brier_delta||0).toFixed(3)} model=${(x.signal_model||{}).id||'—'} pit=${(x.snapshot_manifest||{}).pit_status||'—'}${newsLine}`;
   }).join('\n');
   const target=document.getElementById('labReportReview') || document.getElementById('btResult');
