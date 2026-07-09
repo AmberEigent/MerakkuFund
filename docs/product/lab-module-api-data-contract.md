@@ -308,6 +308,24 @@ Rules:
           "flow_imbalance": 0.036
         }
       },
+      "news_evidence": {
+        "source": "historical_news",
+        "n_items": 2,
+        "mean_sentiment": 0.35,
+        "label": "bullish",
+        "available_at": "2026-04-10T10:30:00Z",
+        "skipped_no_published": 1,
+        "skipped_future": 3,
+        "items": [
+          {
+            "title": "BTC rally gains support",
+            "url": "https://example.com/news",
+            "published": "2026-04-10T10:00:00Z",
+            "available_at": "2026-04-10T10:00:00Z",
+            "sentiment": 0.5
+          }
+        ]
+      },
       "snapshot_manifest": {
         "token_id": "token_yes",
         "snapshot_id": "snap_market_001",

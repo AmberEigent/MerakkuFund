@@ -1668,8 +1668,14 @@ function renderLabReport(rep){
     : '';
   const warnings=(rep.pit_warnings||[]).slice(0,3).map(w=>
     `${w.market_token_id||'market'}: ${w.message||'PIT warning'}`).join('\n');
-  const sample=(rep.market_sample||[]).slice(0,5).map(x=>
-    `${x.market_token_id}: p_cal=${Number(x.p_cal).toFixed(3)} market=${Number(x.p_market).toFixed(3)} outcome=${x.outcome} Δ=${Number(x.brier_delta||0).toFixed(3)} model=${(x.signal_model||{}).id||'—'} pit=${(x.snapshot_manifest||{}).pit_status||'—'}`).join('\n');
+  const sample=(rep.market_sample||[]).slice(0,5).map(x=>{
+    const ne=x.news_evidence||{};
+    const first=(ne.items&&ne.items[0])||null;
+    const newsLine = ne.source
+      ? `\n  news: ${ne.n_items||0} used · sentiment=${Number(ne.mean_sentiment||0).toFixed(3)} ${ne.label||'neutral'} · skipped_future=${ne.skipped_future||0} · skipped_undated=${ne.skipped_no_published||0}${first?`\n  headline: ${(first.title||'').slice(0,110)}`:''}`
+      : '';
+    return `${x.market_token_id}: p_cal=${Number(x.p_cal).toFixed(3)} market=${Number(x.p_market).toFixed(3)} outcome=${x.outcome} Δ=${Number(x.brier_delta||0).toFixed(3)} model=${(x.signal_model||{}).id||'—'} pit=${(x.snapshot_manifest||{}).pit_status||'—'}${newsLine}`;
+  }).join('\n');
   const target=document.getElementById('labReportReview') || document.getElementById('btResult');
   target.innerHTML=
     `<div style="font-size:13px;margin-bottom:8px"><b>${esc(rep.id)}</b> · hypothesis=${esc(rep.hypothesis_id)} · strategy=${esc(cfg.strategy_id||cfg.signal_model_id||'—')} · ${sourceLabel} · ${rep.gates&&rep.gates.paper_ready?'<span class="v-pos">paper ready</span>':'<span class="v-neg">not ready</span>'}</div>`+
