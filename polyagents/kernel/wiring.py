@@ -330,17 +330,168 @@ def default_registry() -> list:
                          "price": float(r.get("price") or 0.0)})
         return {"target": tgt, "event": event_key, "siblings": sibs}, None
 
+    # stage keywords → level; a STRONGER claim (higher level) logically implies the weaker
+    # ones, so its probability must be ≤ theirs (win ⊆ reach final ⊆ reach semi ⊆ advance).
+    _STAGE_KW = [
+        (("win the", "wins the", "champion", "to win", "winner of"), 4),
+        (("reach the final", "make the final", "in the final", "the final"), 3),
+        (("semifinal", "semi-final", "semi final"), 2),
+        (("quarterfinal", "quarter-final", "quarter final"), 1),
+        (("advance", "group stage", "qualify", "round of", "knockout"), 0),
+    ]
+
+    def _stage_level(q):
+        ql = str(q).lower()
+        for kws, lvl in _STAGE_KW:
+            if any(k in ql for k in kws):
+                return lvl
+        return None
+
+    def _classify_strategy(query):
+        """Route the user's intent to a strategy mode → which relations/signals matter."""
+        q = (query or "").lower()
+        if any(w in q for w in ("套利", "arbitrage", "arb", "无风险", "risk-free", "risk free",
+                                "mispric", "inconsist", "平价", "两腿", "multi-leg")):
+            return "arb"
+        if any(w in q for w in ("短线", "日内", "short-term", "short term", "intraday", "快进",
+                                "scalp", "momentum", "快速", "波段")):
+            return "short"
+        if any(w in q for w in ("hold", "持有", "长期", "long-term", "long term", "到期", "持仓")):
+            return "hold"
+        return "general"
+
+    def _entity_implication(target_question):
+        """Same-entity cluster + logical-implication check: find the target entity's other
+        markets, order them by stage, and flag where a STRONGER claim is priced above a
+        weaker one (P(win) > P(reach final) is a risk-free inconsistency)."""
+        m = re.match(r"will\s+(.+?)\s+(win|reach|advance|make|beat|qualify|to win)",
+                     str(target_question or "").lower())
+        ent = m.group(1).strip() if m else None
+        if not ent or len(ent) < 2:
+            return {"entity": None, "cluster": [], "chain": [], "violations": [], "path": None}
+        rows = mcp_server.scan_markets(limit=100, min_volume_24h=0.0)
+        cluster, seen = [], set()
+        for r in rows:
+            if r.get("outcome") != "YES":
+                continue
+            q = str(r.get("question", ""))
+            if ent in q.lower() and q not in seen:
+                seen.add(q)
+                cluster.append({"question": q, "price": round(float(r.get("price") or 0), 4),
+                                "level": _stage_level(q)})
+        staged = sorted([c for c in cluster if c["level"] is not None], key=lambda c: -c["level"])
+        violations = []
+        for i in range(len(staged) - 1):
+            hi, lo = staged[i], staged[i + 1]
+            if hi["level"] > lo["level"] and hi["price"] > lo["price"] + 0.01:
+                violations.append({"stronger": hi["question"], "p_strong": hi["price"],
+                                   "weaker": lo["question"], "p_weak": lo["price"],
+                                   "gap": round(hi["price"] - lo["price"], 4)})
+        path = None                                         # path decomposition: win vs reach-final
+        win_m = next((c for c in staged if c["level"] == 4), None)
+        fin_m = next((c for c in staged if c["level"] == 3), None)
+        if win_m and fin_m and fin_m["price"] > 0:
+            path = {"reach_final": fin_m["price"], "win": win_m["price"],
+                    "implied_p_win_given_final": round(win_m["price"] / fin_m["price"], 4)}
+        return {"entity": ent, "cluster": cluster, "chain": staged,
+                "violations": violations, "path": path}
+
+    def _winner_set_backtest(predict_frac=0.5, normalize=True, max_events=15):
+        """Replay the relational estimate over RESOLVED winner-sets: at a point in time,
+        does the field-implied (vig-free) fair probability beat the raw market price at
+        calling the eventual winner? Returns per-member (market, model, outcome) records."""
+        from polyagents.lab.backtest import BacktestRunner
+        runner = BacktestRunner(client=eng.client, store=getattr(eng, "store", None))
+        raw = eng.client.list_resolved_markets(limit=500)
+        yes = [m for m in eng.client.to_markets(raw) if m.outcome == "YES"]
+        groups: dict = {}
+        for m in yes:
+            q = (m.question or "").lower()
+            key = q.split(" win ", 1)[1].strip(" ?.") if " win " in q else None
+            # only a real competition suffix — reject date/scoreline groupings ("on 2026-..","2-0")
+            if key and not key.startswith("on ") and not re.match(r"^[\d\- ]+$", key):
+                groups.setdefault(key, []).append(m)
+        records, n_events = [], 0
+        for members in groups.values():
+            # a genuine mutually-exclusive winner-set has EXACTLY ONE resolved winner
+            if len(members) < 4 or sum(1 for m in members if m.price >= 0.5) != 1:
+                continue
+            pit = {}                                        # token -> (PIT price, resolved outcome)
+            for m in members:
+                candles = runner.candles_for(m)
+                if len(candles) < 5:
+                    continue
+                idx = min(max(int(predict_frac * len(candles)), 4), len(candles) - 1)
+                pit[m.token_id] = (float(candles[idx].close), 1.0 if m.price >= 0.5 else 0.0)
+            if len(pit) < 3:
+                continue
+            field_sum = sum(p for p, _ in pit.values())
+            if field_sum <= 0:
+                continue
+            n_events += 1
+            for price, won in pit.values():
+                fair = price / field_sum if normalize else price
+                records.append({"market_price": price, "p_model": max(0.01, min(0.99, fair)), "won": won})
+            if n_events >= max_events:
+                break
+        return records, n_events
+
+    def _brier_delta(records):
+        """Mean Brier(market) − Brier(model): positive = model beats the raw market."""
+        if not records:
+            return None
+        bm = sum((r["market_price"] - r["won"]) ** 2 for r in records) / len(records)
+        bd = sum((r["p_model"] - r["won"]) ** 2 for r in records) / len(records)
+        return round(bm - bd, 5)
+
+    def relational_backtest(query=None):
+        """Validate the relational estimate on history + self-test variants (which config
+        beats the market most). This is the evidence behind 'does the signal have alpha'."""
+        variants = [
+            {"name": "field-normalized @50%", "normalize": True, "predict_frac": 0.5},
+            {"name": "raw market @50% (baseline)", "normalize": False, "predict_frac": 0.5},
+            {"name": "field-normalized @40%", "normalize": True, "predict_frac": 0.4},
+            {"name": "field-normalized @60%", "normalize": True, "predict_frac": 0.6},
+        ]
+        results, n_events, n_records = [], 0, 0
+        for v in variants:
+            recs, ne = _winner_set_backtest(predict_frac=v["predict_frac"], normalize=v["normalize"])
+            n_events = max(n_events, ne)
+            n_records = max(n_records, len(recs))
+            results.append({"name": v["name"], "n": len(recs), "brier_delta": _brier_delta(recs),
+                            "beats_market": (_brier_delta(recs) or 0) > 0})
+        ranked = sorted([r for r in results if r["brier_delta"] is not None],
+                        key=lambda r: r["brier_delta"], reverse=True)
+        if n_events == 0:
+            note = ("目前**没有已结算的互斥冠军集**可回测(真冠军集需恰好一个赢家;Polymarket 历史里极少,"
+                    "唯一活跃的 2026 世界杯尚未结算)。历史回放这条路暂时喂不饱——正确做法是**前向追踪**:"
+                    "把每次算出的 fair_prob 落库,等市场结算后打分(Tier2 预测追踪)。")
+        elif n_events < 5:
+            note = f"样本偏少(仅 {n_events} 个已结算冠军集),结论仅供参考;随赛事结算/预测追踪累积会变准。"
+        else:
+            note = "样本充足。"
+        return {"query": query, "n_events": n_events, "n_records": n_records,
+                "variants": results, "best": ranked[0] if ranked else None, "note": note}
+
     def relational_alpha(query, top_k=8):
-        """Event-relatedness engine: winner-set consistency + redistribution + lag
-        detection + what-if. Deterministic, computed from live prices + candle history."""
+        """Event-relatedness engine across relation types + strategy mode: winner-set
+        consistency + redistribution + lag + what-if, PLUS same-entity cluster and
+        logical-implication (A⊆B) arbitrage. Deterministic, from live prices + candles."""
+        strategy_mode = _classify_strategy(query)
         ws, err = _winner_set(query)
         if err:
-            return {"query": query, "error": err["error"]}
+            return {"query": query, "strategy_mode": strategy_mode, "error": err["error"]}
         tgt, sibs, event = ws["target"], ws["siblings"], ws["event"]
+        impl = _entity_implication(tgt.get("question"))     # same-entity cluster + implication
+        implication = {"entity": impl["entity"], "chain": impl["chain"],
+                       "violations": impl["violations"], "path": impl["path"]}
         tgt_sib = next((s for s in sibs if s["question"] == tgt.get("question")), None)
         if event is None or tgt_sib is None or len(sibs) < 3:
-            return {"query": query, "target": tgt, "event": event, "siblings_n": len(sibs),
-                    "note": "未找到清晰的互斥冠军集(目标非 'win the X' 型,或同组市场太少),关联推理不适用。"}
+            return {"query": query, "strategy_mode": strategy_mode, "target": tgt, "event": event,
+                    "siblings_n": len(sibs), "implication": implication,
+                    "note": ("未找到清晰的互斥冠军集(目标非 'win the X' 型),但已按同实体簇/逻辑蕴含分析。"
+                             if impl["chain"] else
+                             "未找到清晰的互斥冠军集,也没有可用的同实体关联市场,关联推理不适用。")}
         tgt_price = tgt_sib["price"]
         field_sum = sum(s["price"] for s in sibs)
         rest = field_sum - tgt_price
@@ -372,8 +523,9 @@ def default_registry() -> list:
             whatif.append({"question": r["question"], "rival_price": round(r["price"], 4),
                            "target_fair_if_out": round(tgt_new, 4),
                            "delta": round(tgt_new - tgt_price, 4)})
-        return {"query": query, "target": {**tgt, "price": round(tgt_price, 4),
-                                           "fair_share": round(tgt_price / field_sum, 4) if field_sum else 0},
+        return {"query": query, "strategy_mode": strategy_mode, "implication": implication,
+                "target": {**tgt, "price": round(tgt_price, 4),
+                           "fair_share": round(tgt_price / field_sum, 4) if field_sum else 0},
                 "event": event, "n_field": len(sibs), "field_sum": round(field_sum, 3),
                 "consistency": ("overround(市场加价)" if field_sum > 1.03
                                 else "underround(反常低估)" if field_sum < 0.97 else "tight(接近无套利)"),
@@ -390,6 +542,7 @@ def default_registry() -> list:
         import json as _json
         rel = relational_alpha(query)
         news = news_sentiment(query)
+        bt = relational_backtest(query)                     # historical validation + variant self-test
         news_sig = news.get("signal") if isinstance(news, dict) else None
         news_mean = news.get("mean_sentiment") if isinstance(news, dict) else None
 
@@ -406,19 +559,35 @@ def default_registry() -> list:
             synth = {"fair_prob": fair, "market_price": market,
                      "edge_vs_market": round(fair - market, 4), "confidence": conf,
                      "sources": {**rel.get("prob_sources", {}), "news_adj": news_adj}}
-        evidence = _json.dumps({"synthesized_fair_prob": synth, "relational": rel,
-                                "news_signal": news_sig, "news_mean": news_mean},
-                               ensure_ascii=False, default=str)[:2600]
+        evidence = _json.dumps({"synthesized_fair_prob": synth,
+                                "historical_backtest": {"n_events": bt.get("n_events"),
+                                                        "best": bt.get("best"), "variants": bt.get("variants"),
+                                                        "note": bt.get("note")},
+                                "relational": rel, "news_signal": news_sig, "news_mean": news_mean},
+                               ensure_ascii=False, default=str)[:2900]
         review = None
         try:
+            mode = (rel.get("strategy_mode") if isinstance(rel, dict) else None) or "general"
+            mode_hint = {
+                "hold": "This is a HOLD/long-term thesis: emphasize structural fair value (winner-set "
+                        "consistency + logical-implication bounds) and whether the mispricing should "
+                        "converge by resolution.",
+                "short": "This is a SHORT-TERM thesis: emphasize the lag signal, recent related-market "
+                         "moves, and news — repricing speed matters more than structural value.",
+                "arb": "This is an ARBITRAGE thesis: emphasize logical-implication violations "
+                       "(P(stronger)>P(weaker)), winner-set Σ≠1, and any risk-free multi-leg. If no "
+                       "inconsistency is found, say so plainly.",
+                "general": "Weigh structural value, lag, and any inconsistency together.",
+            }[mode]
             sys = ("You are a prediction-market quant reviewer. The user proposes a trading "
-                   "thesis/strategy. Using ONLY the computed evidence provided (a synthesized fair "
-                   "probability, a winner-set relational analysis, a news-sentiment signal), judge "
-                   "whether the thesis has alpha and propose 2-3 CONCRETE improvements. Anchor the "
-                   "verdict on synthesized_fair_prob vs market (edge_vs_market) and cite the actual "
-                   "numbers (fair_prob, edge, lag_gap, what-if deltas). Never invent data; if evidence "
-                   "is thin, say so and say what data would settle it. Answer in the user's language, "
-                   "<180 words, as: 1) 复述策略 2) alpha 判定(据合成概率与数据) 3) 改进建议.")
+                   f"thesis/strategy. Strategy mode = {mode}. {mode_hint} Using ONLY the computed "
+                   "evidence (synthesized fair prob, historical backtest w/ variant self-test, "
+                   "winner-set analysis, same-entity implication chain + violations, news), judge "
+                   "whether the thesis has alpha and propose 2-3 CONCRETE improvements tailored to the "
+                   "strategy mode. Anchor on synthesized_fair_prob vs market AND the backtest; for arb, "
+                   "cite implication violations. Prefer the best self-test variant for improvements. "
+                   "Cite real numbers; never invent data; if evidence is thin, say so. Answer in the "
+                   "user's language, <190 words, as: 1) 复述策略(含策略类型) 2) alpha 判定(据数) 3) 改进建议.")
             user = f"User thesis / request:\n{query}\n\nComputed evidence (JSON):\n{evidence}"
             resp = eng._get_llm().invoke([("system", sys), ("user", user)])
             text = getattr(resp, "content", resp)
@@ -427,7 +596,7 @@ def default_registry() -> list:
             review = str(text).strip()
         except Exception as exc:
             review = f"(评审生成失败:{type(exc).__name__};以下为可计算的关联证据。)"
-        return {"query": query, "synth": synth, "relational": rel,
+        return {"query": query, "synth": synth, "backtest": bt, "relational": rel,
                 "news_signal": news_sig, "review": review}
 
     # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --
@@ -694,7 +863,7 @@ def default_registry() -> list:
         q = (query or "").strip()
         m = mcp_server._get_market(q) if q else None      # exact token id?
         if m is None:
-            rows = mcp_server.scan_markets(limit=40, min_volume_24h=0.0)
+            rows = mcp_server.scan_markets(limit=120, min_volume_24h=0.0)   # wide net (WC dominates top)
             best, best_hits = _best_match(rows, {w for w in q.lower().split() if len(w) > 2})
             if best_hits == 0:                            # no English overlap (e.g. a Chinese name):
                 terms = {w for t in _topic_terms(q) for w in _words(t)}   # LLM-translate, then retry
@@ -703,6 +872,11 @@ def default_registry() -> list:
                 return {"token_id": best["token_id"], "question": best["question"],
                         "price": best["price"], "matched_by": f"keywords({best_hits})"}
             m = eng.most_active_market()                   # nothing matched
+            generic = (not q) or any(w in q.lower() for w in
+                                     ("最活跃", "活跃", "most active", "liquid", "一个市场", "any market"))
+            if m is not None and not generic:              # a specific target we couldn't find — be honest
+                return {"token_id": m.token_id, "question": m.question, "price": m.price,
+                        "matched_by": f"fallback", "unmatched": q[:40]}
         if m is None:
             return {"error": "no market found", "query": query}
         return {"token_id": m.token_id, "question": m.question, "price": m.price,
