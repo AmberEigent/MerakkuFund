@@ -330,6 +330,74 @@ def default_registry() -> list:
                          "price": float(r.get("price") or 0.0)})
         return {"target": tgt, "event": event_key, "siblings": sibs}, None
 
+    def _winner_set_backtest(predict_frac=0.5, normalize=True, max_events=15):
+        """Replay the relational estimate over RESOLVED winner-sets: at a point in time,
+        does the field-implied (vig-free) fair probability beat the raw market price at
+        calling the eventual winner? Returns per-member (market, model, outcome) records."""
+        from polyagents.lab.backtest import BacktestRunner
+        runner = BacktestRunner(client=eng.client, store=getattr(eng, "store", None))
+        raw = eng.client.list_resolved_markets(limit=200)
+        yes = [m for m in eng.client.to_markets(raw) if m.outcome == "YES"]
+        groups: dict = {}
+        for m in yes:
+            q = (m.question or "").lower()
+            if " win " in q:
+                groups.setdefault(q.split(" win ", 1)[1].strip(" ?."), []).append(m)
+        records, n_events = [], 0
+        for members in groups.values():
+            if len(members) < 3:
+                continue
+            pit = {}                                        # token -> (PIT price, resolved outcome)
+            for m in members:
+                candles = runner.candles_for(m)
+                if len(candles) < 5:
+                    continue
+                idx = min(max(int(predict_frac * len(candles)), 4), len(candles) - 1)
+                pit[m.token_id] = (float(candles[idx].close), 1.0 if m.price >= 0.5 else 0.0)
+            if len(pit) < 3:
+                continue
+            field_sum = sum(p for p, _ in pit.values())
+            if field_sum <= 0:
+                continue
+            n_events += 1
+            for price, won in pit.values():
+                fair = price / field_sum if normalize else price
+                records.append({"market_price": price, "p_model": max(0.01, min(0.99, fair)), "won": won})
+            if n_events >= max_events:
+                break
+        return records, n_events
+
+    def _brier_delta(records):
+        """Mean Brier(market) − Brier(model): positive = model beats the raw market."""
+        if not records:
+            return None
+        bm = sum((r["market_price"] - r["won"]) ** 2 for r in records) / len(records)
+        bd = sum((r["p_model"] - r["won"]) ** 2 for r in records) / len(records)
+        return round(bm - bd, 5)
+
+    def relational_backtest(query=None):
+        """Validate the relational estimate on history + self-test variants (which config
+        beats the market most). This is the evidence behind 'does the signal have alpha'."""
+        variants = [
+            {"name": "field-normalized @50%", "normalize": True, "predict_frac": 0.5},
+            {"name": "raw market @50% (baseline)", "normalize": False, "predict_frac": 0.5},
+            {"name": "field-normalized @40%", "normalize": True, "predict_frac": 0.4},
+            {"name": "field-normalized @60%", "normalize": True, "predict_frac": 0.6},
+        ]
+        results, n_events, n_records = [], 0, 0
+        for v in variants:
+            recs, ne = _winner_set_backtest(predict_frac=v["predict_frac"], normalize=v["normalize"])
+            n_events = max(n_events, ne)
+            n_records = max(n_records, len(recs))
+            results.append({"name": v["name"], "n": len(recs), "brier_delta": _brier_delta(recs),
+                            "beats_market": (_brier_delta(recs) or 0) > 0})
+        ranked = sorted([r for r in results if r["brier_delta"] is not None],
+                        key=lambda r: r["brier_delta"], reverse=True)
+        return {"query": query, "n_events": n_events, "n_records": n_records,
+                "variants": results, "best": ranked[0] if ranked else None,
+                "note": ("样本充足" if n_events >= 5 else
+                         f"样本不足(仅 {n_events} 个已结算冠军集),结论仅供参考——随赛事结算/云端 DB 累积会变准。")}
+
     def relational_alpha(query, top_k=8):
         """Event-relatedness engine: winner-set consistency + redistribution + lag
         detection + what-if. Deterministic, computed from live prices + candle history."""
@@ -390,6 +458,7 @@ def default_registry() -> list:
         import json as _json
         rel = relational_alpha(query)
         news = news_sentiment(query)
+        bt = relational_backtest(query)                     # historical validation + variant self-test
         news_sig = news.get("signal") if isinstance(news, dict) else None
         news_mean = news.get("mean_sentiment") if isinstance(news, dict) else None
 
@@ -406,19 +475,24 @@ def default_registry() -> list:
             synth = {"fair_prob": fair, "market_price": market,
                      "edge_vs_market": round(fair - market, 4), "confidence": conf,
                      "sources": {**rel.get("prob_sources", {}), "news_adj": news_adj}}
-        evidence = _json.dumps({"synthesized_fair_prob": synth, "relational": rel,
-                                "news_signal": news_sig, "news_mean": news_mean},
-                               ensure_ascii=False, default=str)[:2600]
+        evidence = _json.dumps({"synthesized_fair_prob": synth,
+                                "historical_backtest": {"n_events": bt.get("n_events"),
+                                                        "best": bt.get("best"), "variants": bt.get("variants"),
+                                                        "note": bt.get("note")},
+                                "relational": rel, "news_signal": news_sig, "news_mean": news_mean},
+                               ensure_ascii=False, default=str)[:2900]
         review = None
         try:
             sys = ("You are a prediction-market quant reviewer. The user proposes a trading "
                    "thesis/strategy. Using ONLY the computed evidence provided (a synthesized fair "
-                   "probability, a winner-set relational analysis, a news-sentiment signal), judge "
-                   "whether the thesis has alpha and propose 2-3 CONCRETE improvements. Anchor the "
-                   "verdict on synthesized_fair_prob vs market (edge_vs_market) and cite the actual "
-                   "numbers (fair_prob, edge, lag_gap, what-if deltas). Never invent data; if evidence "
-                   "is thin, say so and say what data would settle it. Answer in the user's language, "
-                   "<180 words, as: 1) 复述策略 2) alpha 判定(据合成概率与数据) 3) 改进建议.")
+                   "probability, a HISTORICAL backtest of the relational estimate with variant "
+                   "self-test, a winner-set relational analysis, a news signal), judge whether the "
+                   "thesis has alpha and propose 2-3 CONCRETE improvements. Anchor the verdict on BOTH "
+                   "synthesized_fair_prob vs market AND the historical_backtest (does the relational "
+                   "estimate beat the market — brier_delta, best variant, n_events). For improvements, "
+                   "prefer the best-performing variant from the self-test. Cite the actual numbers. "
+                   "Never invent data; if n_events is small, say the backtest is thin. Answer in the "
+                   "user's language, <190 words, as: 1) 复述策略 2) alpha 判定(据合成概率+历史回测) 3) 改进建议(据变体自测).")
             user = f"User thesis / request:\n{query}\n\nComputed evidence (JSON):\n{evidence}"
             resp = eng._get_llm().invoke([("system", sys), ("user", user)])
             text = getattr(resp, "content", resp)
@@ -427,7 +501,7 @@ def default_registry() -> list:
             review = str(text).strip()
         except Exception as exc:
             review = f"(评审生成失败:{type(exc).__name__};以下为可计算的关联证据。)"
-        return {"query": query, "synth": synth, "relational": rel,
+        return {"query": query, "synth": synth, "backtest": bt, "relational": rel,
                 "news_signal": news_sig, "review": review}
 
     # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --

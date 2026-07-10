@@ -994,6 +994,19 @@ def _format_alpha_review(a: dict, path: str) -> str:
                      f"+ 新闻调整 {src.get('news_adj'):+}\n")
     if a.get("review"):
         lines.append(a["review"])
+    bt = a.get("backtest")
+    if bt and bt.get("variants"):
+        best = bt.get("best") or {}
+        lines.append(f"\n**历史回测(关联估计 vs 市场)+ 变体自测** · {bt.get('n_events')} 个已结算冠军集")
+        lines.append("\n| 变体 | n | BrierΔ | 跑赢市场 |")
+        lines.append("|---|---|---|---|")
+        for v in bt["variants"]:
+            bd = v.get("brier_delta")
+            star = " ⭐" if v.get("name") == best.get("name") else ""
+            lines.append(f"| {v.get('name')}{star} | {v.get('n')} | {bd if bd is not None else '—'} | "
+                         f"{'✅' if v.get('beats_market') else '❌'} |")
+        if bt.get("note"):
+            lines.append(f"\n_{bt['note']}_")
     if a.get("news_signal"):
         lines.append(f"\n_新闻情绪信号:{a['news_signal']}_")
     rel = a.get("relational") or {}
