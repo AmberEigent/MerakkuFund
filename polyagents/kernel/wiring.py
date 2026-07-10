@@ -359,6 +359,12 @@ def default_registry() -> list:
         lag_gap = round(implied_rise - max(0.0, tgt_delta), 4)   # …minus what it actually gained
         signal = "buy" if lag_gap > 0.01 else ("watch" if lag_gap > 0.003 else "none")
 
+        # ---- fair-probability synthesizer (structural): field-implied + lag correction ----
+        p_field = tgt_price / field_sum if field_sum else tgt_price     # vig-free field consensus
+        lag_adj = round(0.5 * lag_gap, 4)                               # half the un-repriced field move
+        fair_p = round(max(0.01, min(0.99, p_field + lag_adj)), 4)
+        edge_structural = round(fair_p - tgt_price, 4)
+
         whatif = []
         for r in rivals[:5]:
             newrest = field_sum - r["price"]
@@ -373,6 +379,8 @@ def default_registry() -> list:
                                 else "underround(反常低估)" if field_sum < 0.97 else "tight(接近无套利)"),
                 "target_recent_delta": tgt_delta, "field_released": round(released, 4),
                 "implied_target_rise": implied_rise, "lag_gap": lag_gap, "signal": signal,
+                "fair_prob": fair_p, "edge_vs_market": edge_structural,
+                "prob_sources": {"field_implied": round(p_field, 4), "lag_adj": lag_adj},
                 "top_rivals": rival_moves[:6], "what_if": whatif}
 
     def research_alpha(query):
@@ -383,18 +391,34 @@ def default_registry() -> list:
         rel = relational_alpha(query)
         news = news_sentiment(query)
         news_sig = news.get("signal") if isinstance(news, dict) else None
-        evidence = _json.dumps({"relational": rel, "news_signal": news_sig,
-                                "news_mean": news.get("mean_sentiment") if isinstance(news, dict) else None},
+        news_mean = news.get("mean_sentiment") if isinstance(news, dict) else None
+
+        # ---- synthesize ONE fair probability: structural (field+lag) + news adjustment ----
+        synth = None
+        if not rel.get("error") and rel.get("fair_prob") is not None:
+            news_adj = round(max(-0.03, min(0.03, (news_mean or 0.0) * 0.03)), 4)
+            base = rel["fair_prob"]                              # field-implied + lag
+            fair = round(max(0.01, min(0.99, base + news_adj)), 4)
+            market = (rel.get("target") or {}).get("price") or 0.0
+            tight = 0.97 <= (rel.get("field_sum") or 0) <= 1.03
+            conf = ("高" if tight and (rel.get("n_field") or 0) >= 4 and news_mean is not None
+                    else "中" if tight else "低")
+            synth = {"fair_prob": fair, "market_price": market,
+                     "edge_vs_market": round(fair - market, 4), "confidence": conf,
+                     "sources": {**rel.get("prob_sources", {}), "news_adj": news_adj}}
+        evidence = _json.dumps({"synthesized_fair_prob": synth, "relational": rel,
+                                "news_signal": news_sig, "news_mean": news_mean},
                                ensure_ascii=False, default=str)[:2600]
         review = None
         try:
             sys = ("You are a prediction-market quant reviewer. The user proposes a trading "
-                   "thesis/strategy. Using ONLY the computed evidence provided (a winner-set "
-                   "relational analysis + a news-sentiment signal), judge whether the thesis has "
-                   "alpha and propose 2-3 CONCRETE improvements. Cite the actual numbers "
-                   "(lag_gap, field_sum, what-if deltas). Never invent data; if evidence is thin, "
-                   "say so and say what data would settle it. Answer in the user's language, <170 words, "
-                   "as: 1) 复述策略 2) alpha 判定(据数) 3) 改进建议.")
+                   "thesis/strategy. Using ONLY the computed evidence provided (a synthesized fair "
+                   "probability, a winner-set relational analysis, a news-sentiment signal), judge "
+                   "whether the thesis has alpha and propose 2-3 CONCRETE improvements. Anchor the "
+                   "verdict on synthesized_fair_prob vs market (edge_vs_market) and cite the actual "
+                   "numbers (fair_prob, edge, lag_gap, what-if deltas). Never invent data; if evidence "
+                   "is thin, say so and say what data would settle it. Answer in the user's language, "
+                   "<180 words, as: 1) 复述策略 2) alpha 判定(据合成概率与数据) 3) 改进建议.")
             user = f"User thesis / request:\n{query}\n\nComputed evidence (JSON):\n{evidence}"
             resp = eng._get_llm().invoke([("system", sys), ("user", user)])
             text = getattr(resp, "content", resp)
@@ -403,7 +427,8 @@ def default_registry() -> list:
             review = str(text).strip()
         except Exception as exc:
             review = f"(评审生成失败:{type(exc).__name__};以下为可计算的关联证据。)"
-        return {"query": query, "relational": rel, "news_signal": news_sig, "review": review}
+        return {"query": query, "synth": synth, "relational": rel,
+                "news_signal": news_sig, "review": review}
 
     # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --
 

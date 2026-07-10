@@ -945,6 +945,14 @@ def _format_relational(a: dict, path: str) -> str:
         lines.append(f"**标的**:{tgt.get('question')}\n\n{a['note']}")
         return "\n".join(lines)
     lines.append(f"**标的**:{tgt.get('question')}  \n市场价 {tgt.get('price')} · 冠军集内应有份额 {tgt.get('fair_share')}")
+    if a.get("fair_prob") is not None:
+        src = a.get("prob_sources") or {}
+        edge = a.get("edge_vs_market")
+        verdict = "低估→偏买" if isinstance(edge, (int, float)) and edge > 0.005 else \
+                  ("高估→偏卖" if isinstance(edge, (int, float)) and edge < -0.005 else "接近公允")
+        lines.append(f"\n**合成公允概率(结构性)= {a.get('fair_prob')}** · 市场 {tgt.get('price')} · "
+                     f"**edge {edge:+}** · {verdict}")
+        lines.append(f"　来源:冠军集隐含 {src.get('field_implied')} + 滞后修正 {src.get('lag_adj'):+}")
     lines.append(f"\n**① 冠军集一致性**:{a.get('n_field')} 个互斥标的,Σ价格 = **{a.get('field_sum')}** · {a.get('consistency')}")
     sig = a.get("signal")
     tag = "🟢 买入" if sig == "buy" else ("🟡 观察" if sig == "watch" else "⚪ 无")
@@ -974,6 +982,16 @@ def _format_alpha_review(a: dict, path: str) -> str:
     if a.get("error"):
         return f"**策略评审 · research_alpha** · {path}\n\n失败:{a['error']}"
     lines = [f"**策略评审 · research_alpha** · {path}", ""]
+    s = a.get("synth")
+    if s:
+        edge = s.get("edge_vs_market")
+        verdict = "低估 → 偏买" if isinstance(edge, (int, float)) and edge > 0.005 else \
+                  ("高估 → 偏卖" if isinstance(edge, (int, float)) and edge < -0.005 else "接近公允")
+        src = s.get("sources") or {}
+        lines.append(f"**合成公允概率 = {s.get('fair_prob')}** · 市场 {s.get('market_price')} · "
+                     f"**edge {edge:+}** · {verdict} · 置信 {s.get('confidence')}")
+        lines.append(f"　来源:冠军集隐含 {src.get('field_implied')} + 滞后修正 {src.get('lag_adj'):+} "
+                     f"+ 新闻调整 {src.get('news_adj'):+}\n")
     if a.get("review"):
         lines.append(a["review"])
     if a.get("news_signal"):
