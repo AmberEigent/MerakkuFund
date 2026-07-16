@@ -22,8 +22,9 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            microstructure_scan_capability, news_sentiment_capability,
                            paper_trade_capability, portfolio_review_capability,
                            settle_and_reflect_capability,
-                           market_radar_capability,
-                           plot_market_capability, relational_alpha_capability,
+                           log_prediction_capability, market_radar_capability,
+                           plot_market_capability, prediction_journal_capability,
+                           relational_alpha_capability,
                            research_alpha_capability, scan_conditional_arb_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
@@ -769,6 +770,89 @@ def default_registry() -> list:
                 "movers": movers, "near_resolution": near_out, "fresh": fresh,
                 "structural": structural, "insight": insight}
 
+    # ----- pack: prediction-journal (log your own P, score it after resolution) --
+
+    def log_prediction(query):
+        """Record the user's OWN subjective probability for a market (+ the market price
+        now). Parse the % / decimal from the request, resolve the market, persist to the
+        shared journal (cloud DB when configured)."""
+        q = query or ""
+        pm = re.search(r"(\d+(?:\.\d+)?)\s*%", q)
+        if pm:
+            user_p = float(pm.group(1)) / 100.0
+        else:
+            dm = re.search(r"\b0?\.\d+\b", q)
+            user_p = float(dm.group(0)) if dm else None
+        if user_p is None:
+            return {"error": "没解析到你的概率——请说明,例如「记录我对法国夺冠的预测:30%」或「…0.30」。"}
+        user_p = max(0.01, min(0.99, user_p))
+        clean = re.sub(r"\d+(?:\.\d+)?\s*%|\b0?\.\d+\b", " ", q)      # drop the probability
+        clean = re.sub(r"记录|我对|的预测|我觉得|我认为|我预测|概率(是|为|大概)?|预测|押注?|大概|"
+                       r"log( my)?|prediction|probability|estimate|[:：]", " ", clean, flags=re.I)
+        ref = resolve(clean.strip() or q)                             # resolve the market name only
+        if ref.get("error"):
+            return {"error": ref["error"]}
+        if ref.get("matched_by") == "fallback":                       # don't log a wrong market
+            return {"error": f"没准确匹配到你说的标的(退回到「{ref.get('question')}」),没记录。"
+                             f"请用更贴近市场原名的说法,如「记录我对 France win World Cup 的预测:30%」。"}
+        mk = mcp_server._get_market(ref.get("token_id", ""))
+        market_p = float(mk.price) if mk else float(ref.get("price") or 0.0)
+        try:
+            from polyagents.storage.predictions import PredictionStore
+            store = PredictionStore()
+            store.log(token_id=ref["token_id"], condition_id=(mk.condition_id if mk else ""),
+                      question=ref["question"], category=categorize(ref["question"]),
+                      user_p=user_p, market_p=market_p, note=q[:140])
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
+        return {"logged": {"question": ref["question"], "user_p": round(user_p, 4),
+                           "market_p": round(market_p, 4), "edge_vs_market": round(user_p - market_p, 4),
+                           "matched_by": ref.get("matched_by")}}
+
+    def prediction_journal(query=None):
+        """Show the journal: auto-settle any open calls whose market has resolved (Brier
+        you vs market), list open calls with current edge, and aggregate where your
+        subjective read beats the market (overall + by category)."""
+        try:
+            from polyagents.storage.predictions import PredictionStore
+            store = PredictionStore()
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
+        settled_now = 0
+        for p in store.open():                              # auto-settle resolved markets
+            cid = p.get("condition_id")
+            raw = eng.client.fetch_market_by_condition(cid) if cid else None
+            if not raw or not (raw.get("closed") or raw.get("archived")):
+                continue
+            yes = next((mm for mm in eng.client.to_markets([raw]) if mm.token_id == p["token_id"]), None)
+            if yes is None:
+                continue
+            outcome = 1 if yes.price >= 0.5 else 0
+            store.mark_resolved(p["id"], outcome, round((p["user_p"] - outcome) ** 2, 4),
+                                round((p["market_p"] - outcome) ** 2, 4))
+            settled_now += 1
+        allp = store.all()
+        openp = [{"question": p["question"], "user_p": p["user_p"], "market_p": p["market_p"],
+                  "edge": round((p["user_p"] or 0) - (p["market_p"] or 0), 4),
+                  "created_at": (p["created_at"] or "")[:10]} for p in allp if not p["resolved"]]
+        resolved = [p for p in allp if p["resolved"]]
+        agg, by_cat = None, []
+        if resolved:
+            mbu = sum(p["brier_user"] for p in resolved) / len(resolved)
+            mbm = sum(p["brier_market"] for p in resolved) / len(resolved)
+            hit = sum(1 for p in resolved if (p["user_p"] >= 0.5) == (p["outcome"] == 1)) / len(resolved)
+            agg = {"n_resolved": len(resolved), "brier_user": round(mbu, 4), "brier_market": round(mbm, 4),
+                   "brier_delta": round(mbm - mbu, 4), "beats_market": mbm > mbu, "hit_rate": round(hit, 3)}
+            cats = {}
+            for p in resolved:
+                c = cats.setdefault(p["category"] or "other", {"n": 0, "bu": 0.0, "bm": 0.0})
+                c["n"] += 1; c["bu"] += p["brier_user"]; c["bm"] += p["brier_market"]
+            by_cat = sorted([{"category": k, "n": v["n"],
+                              "brier_delta": round(v["bm"] / v["n"] - v["bu"] / v["n"], 4)}
+                             for k, v in cats.items()], key=lambda x: -x["brier_delta"])
+        return {"query": query, "settled_now": settled_now, "n_open": len(openp),
+                "open": openp[:12], "aggregate": agg, "by_category": by_cat}
+
     # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --
 
     def backfill_outcomes(query, limit=1000):
@@ -1301,6 +1385,8 @@ def default_registry() -> list:
         research_alpha_capability(research_alpha),
         scan_conditional_arb_capability(scan_conditional_arb),
         market_radar_capability(market_radar),
+        log_prediction_capability(log_prediction),
+        prediction_journal_capability(prediction_journal),
         backfill_outcomes_capability(backfill_outcomes),
         lab_backtest_capability(lab_backtest),
         evaluate_skill_capability(evaluate_skill),

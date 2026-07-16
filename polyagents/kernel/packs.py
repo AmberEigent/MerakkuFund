@@ -42,6 +42,12 @@ PACKS: dict[str, dict] = {
         "description": "拉某市场/主题的新闻并打情绪分,事件驱动信号(需 TAVILY_API_KEY)。",
         "capabilities": ["news_sentiment"],
     },
+    "prediction-journal": {
+        "name": "个人预测日志(校准你的直觉)",
+        "description": "记录你对市场的**主观概率**(+当时市场价)落库,市场结算后自动打分(Brier 你 vs 市场),"
+                       "累积告诉你**在哪类市场你的判断真有 edge**。前向追踪,数据进共享/云库越攒越准。",
+        "capabilities": ["log_prediction", "prediction_journal"],
+    },
     "market-radar": {
         "name": "市场雷达(今天有什么变了)",
         "description": "扫全市场,surface 给人肉深挖的线索:近期价格**异动**最大的、**临近结算**的(endgame)、"

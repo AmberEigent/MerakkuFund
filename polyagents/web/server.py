@@ -1064,6 +1064,53 @@ def _format_alpha_review(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+def _format_prediction_logged(a: dict, path: str) -> str:
+    if a.get("error"):
+        return f"**预测记录 · log_prediction** · {path}\n\n{a['error']}"
+    L = a.get("logged") or {}
+    edge = L.get("edge_vs_market")
+    lean = "你更看多" if isinstance(edge, (int, float)) and edge > 0 else \
+           ("你更看空" if isinstance(edge, (int, float)) and edge < 0 else "与市场一致")
+    lines = [f"**预测已记录 · log_prediction** · {path}", "",
+             f"**已记录到**:{L.get('question')}",
+             f"你的概率 **{L.get('user_p')}** · 当时市场价 {L.get('market_p')} · edge **{edge:+}** · {lean}",
+             f"\n_匹配方式 {L.get('matched_by')}。**如果不是你要的标的**,请用市场原名/英文名重记。"
+             f"市场结算后来 `prediction_journal` 看你 vs 市场的打分。_"]
+    return "\n".join(lines)
+
+
+def _format_prediction_journal(a: dict, path: str) -> str:
+    if a.get("error"):
+        return f"**预测日志 · prediction_journal** · {path}\n\n{a['error']}"
+    lines = [f"**预测日志 · prediction_journal** · {path}", "",
+             f"_本次自动结算 {a.get('settled_now')} 笔 · 未结算 {a.get('n_open')} 笔_"]
+    agg = a.get("aggregate")
+    if agg:
+        verdict = "🟢 你在跑赢市场" if agg.get("beats_market") else "🔴 尚未跑赢市场"
+        lines.append(f"\n**你的校准(已结算 {agg.get('n_resolved')} 笔)** · {verdict}")
+        lines.append(f"　Brier:你 **{agg.get('brier_user')}** vs 市场 {agg.get('brier_market')} · "
+                     f"**brierΔ {agg.get('brier_delta'):+}**(>0=你更准)· 命中率 {agg.get('hit_rate')}")
+        by = a.get("by_category") or []
+        if by:
+            lines.append("\n| 类别 | 已结算 | brierΔ(你−市场) |")
+            lines.append("|---|---|---|")
+            for c in by:
+                lines.append(f"| {c.get('category')} | {c.get('n')} | **{c.get('brier_delta'):+}** |")
+    else:
+        lines.append("\n_还没有已结算的预测——等你记录的市场结算后,这里会出现「你 vs 市场」的打分与按类别的 edge。_")
+    openp = a.get("open") or []
+    if openp:
+        lines.append("\n**未结算(你的活跃判断)**")
+        lines.append("\n| 市场 | 你的P | 市场价 | edge | 记录日 |")
+        lines.append("|---|---|---|---|---|")
+        for o in openp:
+            lines.append(f"| {(o.get('question') or '')[:32]} | {o.get('user_p')} | {o.get('market_p')} | "
+                         f"**{o.get('edge'):+}** | {o.get('created_at')} |")
+    lines.append("\n_前向追踪:市场结算后自动 Brier 打分(你 vs 市场),brierΔ>0 = 你在这类判断有 edge。"
+                 "数据落共享/云库,越攒越准。_")
+    return "\n".join(lines)
+
+
 def _format_radar(a: dict, path: str) -> str:
     """Render the market radar: movers / near-resolution / fresh, each with WHY it
     matters, plus an LLM angle + arbitrage-check section."""
@@ -1390,6 +1437,10 @@ def _kernel_summary(ctx) -> str:
     # controller may have also run as an intermediate step.
     if "alpha_review" in f:                              # strategy validation + improvement
         return _format_alpha_review(f["alpha_review"], path)
+    if "prediction_logged" in f:                         # user's own subjective call recorded
+        return _format_prediction_logged(f["prediction_logged"], path)
+    if "prediction_journal" in f:                        # journal + personal calibration
+        return _format_prediction_journal(f["prediction_journal"], path)
     if "market_radar" in f:                              # 'what changed today' discovery funnel
         return _format_radar(f["market_radar"], path)
     if "conditional_arb" in f:                           # cross-market conditional/implication arb scan
