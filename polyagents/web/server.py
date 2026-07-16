@@ -1152,6 +1152,158 @@ def _format_alpha_review(a: dict, path: str) -> str:
     return "\n".join(lines)
 
 
+def _format_news_markets(a: dict, path: str) -> str:
+    """Render news → affected markets: LLM direction analysis + the matched candidates."""
+    lines = [f"**新闻→标的映射 · news_to_markets** · {path}", "",
+             f"_新闻:{(a.get('query') or '')[:80]}_"]
+    if a.get("note") and not a.get("candidates"):
+        lines.append(f"\n{a['note']}")
+        if a.get("terms"):
+            lines.append(f"\n_抽取到的实体/关键词:{', '.join(a['terms'])}_")
+        return "\n".join(lines)
+    if a.get("analysis"):
+        lines.append("\n**📰 方向研判(利好/利空,值得验证)**\n")
+        lines.append(a["analysis"])
+    cands = a.get("candidates") or []
+    if cands:
+        lines.append("\n**匹配到的活跃标的**")
+        lines.append("\n| 市场 | 现价 | 关联度 |")
+        lines.append("|---|---|---|")
+        for c in cands:
+            lines.append(f"| {(c.get('question') or '')[:40]} | {c.get('price')} | {c.get('hits')} |")
+    lines.append("\n_LLM 把新闻实体链接到活跃标的并研判方向,**是待验证假设**,非确定。想深挖某个 → analyze_market;"
+                 "想记下你的判断 → log_prediction。_")
+    return "\n".join(lines)
+
+
+def _format_prediction_logged(a: dict, path: str) -> str:
+    if a.get("error"):
+        return f"**预测记录 · log_prediction** · {path}\n\n{a['error']}"
+    L = a.get("logged") or {}
+    edge = L.get("edge_vs_market")
+    lean = "你更看多" if isinstance(edge, (int, float)) and edge > 0 else \
+           ("你更看空" if isinstance(edge, (int, float)) and edge < 0 else "与市场一致")
+    lines = [f"**预测已记录 · log_prediction** · {path}", "",
+             f"**已记录到**:{L.get('question')}",
+             f"你的概率 **{L.get('user_p')}** · 当时市场价 {L.get('market_p')} · edge **{edge:+}** · {lean}",
+             f"\n_匹配方式 {L.get('matched_by')}。**如果不是你要的标的**,请用市场原名/英文名重记。"
+             f"市场结算后来 `prediction_journal` 看你 vs 市场的打分。_"]
+    return "\n".join(lines)
+
+
+def _format_prediction_journal(a: dict, path: str) -> str:
+    if a.get("error"):
+        return f"**预测日志 · prediction_journal** · {path}\n\n{a['error']}"
+    lines = [f"**预测日志 · prediction_journal** · {path}", "",
+             f"_本次自动结算 {a.get('settled_now')} 笔 · 未结算 {a.get('n_open')} 笔_"]
+    agg = a.get("aggregate")
+    if agg:
+        verdict = "🟢 你在跑赢市场" if agg.get("beats_market") else "🔴 尚未跑赢市场"
+        lines.append(f"\n**你的校准(已结算 {agg.get('n_resolved')} 笔)** · {verdict}")
+        lines.append(f"　Brier:你 **{agg.get('brier_user')}** vs 市场 {agg.get('brier_market')} · "
+                     f"**brierΔ {agg.get('brier_delta'):+}**(>0=你更准)· 命中率 {agg.get('hit_rate')}")
+        by = a.get("by_category") or []
+        if by:
+            lines.append("\n| 类别 | 已结算 | brierΔ(你−市场) |")
+            lines.append("|---|---|---|")
+            for c in by:
+                lines.append(f"| {c.get('category')} | {c.get('n')} | **{c.get('brier_delta'):+}** |")
+    else:
+        lines.append("\n_还没有已结算的预测——等你记录的市场结算后,这里会出现「你 vs 市场」的打分与按类别的 edge。_")
+    openp = a.get("open") or []
+    if openp:
+        lines.append("\n**未结算(你的活跃判断)**")
+        lines.append("\n| 市场 | 你的P | 市场价 | edge | 记录日 |")
+        lines.append("|---|---|---|---|---|")
+        for o in openp:
+            lines.append(f"| {(o.get('question') or '')[:32]} | {o.get('user_p')} | {o.get('market_p')} | "
+                         f"**{o.get('edge'):+}** | {o.get('created_at')} |")
+    lines.append("\n_前向追踪:市场结算后自动 Brier 打分(你 vs 市场),brierΔ>0 = 你在这类判断有 edge。"
+                 "数据落共享/云库,越攒越准。_")
+    return "\n".join(lines)
+
+
+def _format_radar(a: dict, path: str) -> str:
+    """Render the market radar: movers / near-resolution / fresh, each with WHY it
+    matters, plus an LLM angle + arbitrage-check section."""
+    lines = [f"**市场雷达 · market_radar** · {path}", "",
+             f"_扫了 {a.get('n_scanned')} 个市场(深检 {a.get('n_deep')} 个)· 每条附「为什么」,末尾给角度/套利建议_"]
+    if a.get("insight"):
+        lines.append("\n**🎯 角度与套利建议(值得查,非保证)**\n")
+        lines.append(a["insight"])
+    struct = a.get("structural") or []
+    if struct:
+        lines.append("\n**📐 结构性一致性检查(可计算)**")
+        lines.append("\n| 比赛 | 胜方Σ P(A)+P(B) | 隐含平局/其它 | 精确比分Σ(部分,n) | 超额套利 |")
+        lines.append("|---|---|---|---|---|")
+        for s in struct[:6]:
+            wsum = s.get("winner_sum")
+            arb = "🟢 卖出" if (s.get("winner_overround") or s.get("exact_overround")) else "—"
+            lines.append(f"| {s.get('match')} | {wsum if wsum is not None else '—'} | "
+                         f"{s.get('implied_draw_other', '—')} | {s.get('exact_sum_partial')} (n={s.get('n_scores')}) | {arb} |")
+        lines.append("　_胜方Σ>1 或 精确比分Σ>1 = 真·超额,全卖即套利(需扣摩擦);Σ<1 属正常(有平局/未收全)。_")
+    movers = a.get("movers") or []
+    if movers:
+        lines.append("\n**① 异动(近期价格变化最大)**")
+        for m in movers:
+            lines.append(f"\n- **{(m.get('question') or '')[:44]}** · 现价 {m.get('price')} · "
+                         f"Δ**{m.get('change'):+}** · 24h量 {m.get('volume_24h'):,}")
+            lines.append(f"  　_{m.get('why', '')}_")
+    near = a.get("near_resolution") or []
+    if near:
+        lines.append("\n**② 临近结算(endgame,波动大)**")
+        for m in near:
+            lines.append(f"\n- **{(m.get('question') or '')[:44]}** · 现价 {m.get('price')} · "
+                         f"{m.get('days')}天到期")
+            lines.append(f"  　_{m.get('why', '')}_")
+    fresh = a.get("fresh") or []
+    if fresh:
+        lines.append("\n**③ 短历史(可能新上市 / 低活跃)**")
+        for m in fresh:
+            lines.append(f"\n- **{(m.get('question') or '')[:44]}** · 现价 {m.get('price')} · "
+                         f"{m.get('n_candles')} 个历史点")
+            lines.append(f"  　_{m.get('why', '')}_")
+    if not (movers or near or fresh):
+        lines.append("\n当前没扫到明显线索(市场平静 / 数据不足)。")
+    lines.append("\n_挑一个深挖 → analyze_market;想验证想法/找套利 → research_alpha / scan_conditional_arb。_")
+    return "\n".join(lines)
+
+
+def _format_conditional_arb(a: dict, path: str) -> str:
+    """Render the cross-market conditional/implication arbitrage scan."""
+    chains = a.get("chains") or []
+    lines = [f"**跨市场条件套利扫描 · scan_conditional_arb** · {path}", "",
+             f"_扫了 {a.get('n_entities')} 个实体,{a.get('n_chains')} 条条件链,"
+             f"**真·逻辑蕴含套利 {a.get('n_true_arb')} 个**_"]
+    if not chains:
+        lines.append("\n未找到可组成条件链的关联标的(需同一实体既有'夺冠'又有'进决赛/晋级/单场'市场;"
+                     "当前多数标的只挂了夺冠盘)。")
+        return "\n".join(lines)
+    arbs = [c for c in chains if c.get("has_arb")]
+    if arbs:
+        lines.append("\n🟢 **真·无风险套利(强命题反而更贵,买弱腿/卖强腿):**")
+        for c in arbs:
+            for v in c["violations"]:
+                lines.append(f"- **{(v.get('stronger') or '')[:34]}**({v.get('p_strong')}) > "
+                             f"{(v.get('weaker') or '')[:34]}({v.get('p_weak')}) · gap **{v.get('gap'):+}**")
+    lines.append("\n**条件概率分解**(P(夺冠|晋级) = P(夺冠) / P(晋级)):")
+    lines.append("\n| 实体 | P(夺冠) | P(晋级/进决赛) | **P(夺冠\\|晋级)** | 蕴含一致 |")
+    lines.append("|---|---|---|---|---|")
+    for c in chains:
+        ok = "✅" if not c.get("has_arb") else "❌ 套利"
+        lines.append(f"| {c.get('entity')} | {c.get('p_champ')} | {c.get('p_advance')} | "
+                     f"**{c.get('cond_champ_given_advance')}** | {ok} |")
+    conds = [c.get("cond_champ_given_advance") for c in chains
+             if isinstance(c.get("cond_champ_given_advance"), (int, float))]
+    if len(conds) >= 3:
+        mid = sorted(conds)[len(conds) // 2]
+        lines.append(f"\n　同档 P(夺冠|晋级) 中位数≈{mid:.3f};显著高于中位=该队'晋级后夺冠'被高估(方向性做空候选),"
+                     f"反之偏低=被低估。**这是方向性价值,非无风险。**")
+    lines.append("\n_真·套利只在**强命题定价高于弱命题**时出现(有界、近无风险,仍需扣手续费/滑点/流动性)。"
+                 "P(单场)×P(夺冠) 那种'链式成本'不是有效套利——条件概率是推导值,市场没单独挂牌,不可执行。_")
+    return "\n".join(lines)
+
+
 def _format_backfill(a: dict, path: str) -> str:
     """Render the outcome-backfill: how many stored snapshots got labelled."""
     if a.get("error"):
@@ -1397,6 +1549,16 @@ def _kernel_summary(ctx) -> str:
     # controller may have also run as an intermediate step.
     if "alpha_review" in f:                              # strategy validation + improvement
         return _format_alpha_review(f["alpha_review"], path)
+    if "news_markets" in f:                              # news → affected markets + direction
+        return _format_news_markets(f["news_markets"], path)
+    if "prediction_logged" in f:                         # user's own subjective call recorded
+        return _format_prediction_logged(f["prediction_logged"], path)
+    if "prediction_journal" in f:                        # journal + personal calibration
+        return _format_prediction_journal(f["prediction_journal"], path)
+    if "market_radar" in f:                              # 'what changed today' discovery funnel
+        return _format_radar(f["market_radar"], path)
+    if "conditional_arb" in f:                           # cross-market conditional/implication arb scan
+        return _format_conditional_arb(f["conditional_arb"], path)
     if "relational_alpha" in f:                          # event-relatedness engine
         return _format_relational(f["relational_alpha"], path)
     if "market_analysis" in f:                          # Goal-1 framework IS the grounded answer
@@ -1448,7 +1610,8 @@ def _kernel_summary(ctx) -> str:
 
 
 async def _stream_kernel(history: list[dict], session: "AgentSession",
-                         packs: list[str] | None = None) -> AsyncIterator[str]:
+                         packs: list[str] | None = None,
+                         model: str | None = None) -> AsyncIterator[str]:
     """Kernel mode: the request goes through the ONE kernel loop, which recognises
     intent and takes the minimal capability path (Q&A via ReAct, or data→backtest,
     …). The prior turns are passed as cross-turn memory; ``packs`` selects which
@@ -1471,7 +1634,8 @@ async def _stream_kernel(history: list[dict], session: "AgentSession",
 
     def work() -> None:
         try:
-            ctx = run_mode("kernel", request=last_text, history=prior, packs=packs, on_event=on_event)
+            ctx = run_mode("kernel", request=last_text, history=prior, packs=packs,
+                           model=model, on_event=on_event)
             loop.call_soon_threadsafe(q.put_nowait, {"type": "_result", "ctx": ctx})
         except Exception as exc:                        # surface, don't crash the stream
             loop.call_soon_threadsafe(q.put_nowait, {"type": "_error", "message": str(exc)})
@@ -1528,7 +1692,7 @@ async def _stream(history: list[dict], skills: list[str], model: str | None = No
     if mode == "kernel":
         session.log("session.start", model=model, skills=skills,
                     attachments=len(attachments or []))
-        async for ev in _stream_kernel(history, session, packs):
+        async for ev in _stream_kernel(history, session, packs, model=model):
             yield ev
         return
     route, by = classify(last_text, manual=(mode if mode in ("domain", "general") else None),

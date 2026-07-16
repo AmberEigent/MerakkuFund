@@ -38,9 +38,29 @@ PACKS: dict[str, dict] = {
         "capabilities": ["microstructure_scan"],
     },
     "news-events": {
-        "name": "新闻 / 事件情绪",
-        "description": "拉某市场/主题的新闻并打情绪分,事件驱动信号(需 TAVILY_API_KEY)。",
-        "capabilities": ["news_sentiment"],
+        "name": "新闻 / 事件(双向)",
+        "description": "两向:①某市场/主题 → 拉新闻打情绪分(news_sentiment,需 TAVILY);②一条新闻/事件 → "
+                       "反查它影响哪些活跃标的 + 方向(news_to_markets,事件驱动主观交易利器)。",
+        "capabilities": ["news_sentiment", "news_to_markets"],
+    },
+    "prediction-journal": {
+        "name": "个人预测日志(校准你的直觉)",
+        "description": "记录你对市场的**主观概率**(+当时市场价)落库,市场结算后自动打分(Brier 你 vs 市场),"
+                       "累积告诉你**在哪类市场你的判断真有 edge**。前向追踪,数据进共享/云库越攒越准。",
+        "capabilities": ["log_prediction", "prediction_journal"],
+    },
+    "market-radar": {
+        "name": "市场雷达(今天有什么变了)",
+        "description": "扫全市场,surface 给人肉深挖的线索:近期价格**异动**最大的、**临近结算**的(endgame)、"
+                       "**短历史/可能新上市**的。只给候选、不下结论——主观找 alpha 的发现漏斗。",
+        "capabilities": ["market_radar"],
+    },
+    "conditional-arb": {
+        "name": "跨市场条件套利扫描",
+        "description": "扫全市场找'冠军 × 晋级/单场'的条件概率关联链:算 P(夺冠|晋级)=P(夺冠)/P(晋级),"
+                       "标出**真·逻辑蕴含套利**(强命题反而更贵=无风险),并把它与'条件概率方向性价值'分开。"
+                       "注:P(单场)×P(夺冠) 那种链式成本不是有效套利,本 skill 只报真的。",
+        "capabilities": ["scan_conditional_arb"],
     },
     "alpha-research": {
         "name": "关联 alpha 研究(策略验证 + 改进)",

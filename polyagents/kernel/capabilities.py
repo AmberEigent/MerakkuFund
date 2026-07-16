@@ -305,6 +305,80 @@ def research_alpha_capability(fn: Callable) -> Capability:
                       frozenset({"question"}), frozenset({"alpha_review"}), run, cost=7)
 
 
+def news_to_markets_capability(fn: Callable) -> Capability:
+    """News → affected markets (pack: news-events) — reverse of news_sentiment.
+    ``fn(query) -> dict`` entity-links a news item to live Polymarket markets and rates
+    each one's likely direction for YES. The event-driven scouting tool."""
+    def run(ctx: Context) -> dict:
+        return {"news_markets": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("news_to_markets",
+                      "Given a NEWS item / headline / event, find which live Polymarket markets it "
+                      "affects and the likely direction (📈利好/📉利空) for each, with why. The reverse "
+                      "of news_sentiment. Use for '这条新闻影响哪些标的 / 利好利空哪些市场 / news → markets "
+                      "/ <某事件>会影响哪些盘'. Needs the news-events pack.",
+                      frozenset({"question"}), frozenset({"news_markets"}), run, cost=4)
+
+
+def log_prediction_capability(fn: Callable) -> Capability:
+    """Log the user's own subjective probability call (pack: prediction-journal).
+    ``fn(query) -> dict`` parses the %/decimal, resolves the market, and records
+    (your P, the market price now) to the shared journal for later scoring."""
+    def run(ctx: Context) -> dict:
+        return {"prediction_logged": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("log_prediction",
+                      "Record the USER'S OWN probability estimate for a market (their subjective "
+                      "call + the market price now), to score later. Use for '记录我对X的预测:30% / "
+                      "我觉得X概率是Y / log my call / 我押X'. Needs the prediction-journal pack.",
+                      frozenset({"question"}), frozenset({"prediction_logged"}), run, cost=2)
+
+
+def prediction_journal_capability(fn: Callable) -> Capability:
+    """Show the prediction journal + personal calibration (pack: prediction-journal).
+    ``fn(query) -> dict`` auto-settles resolved calls (Brier you vs market), lists open
+    calls, and aggregates where your subjective read beats the market (overall/by category)."""
+    def run(ctx: Context) -> dict:
+        return {"prediction_journal": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("prediction_journal",
+                      "Show your prediction journal + personal calibration: open calls with current "
+                      "edge, resolved calls scored (Brier you vs market), and where your judgment "
+                      "has edge (overall + by category). Use for '看我的预测日志 / 我的判断准不准 / "
+                      "我在哪类市场有 edge / show my journal / my calibration'. Needs the pack.",
+                      frozenset({"question"}), frozenset({"prediction_journal"}), run, cost=3)
+
+
+def market_radar_capability(fn: Callable) -> Capability:
+    """Market radar (pack: market-radar) — 'what changed today'. ``fn(query) -> dict``
+    sweeps live markets and surfaces leads for a human to dig into: biggest recent price
+    movers, markets near resolution, and short-history (possibly newly-listed / thin)
+    markets. No verdicts — a discovery funnel for subjective alpha hunting."""
+    def run(ctx: Context) -> dict:
+        return {"market_radar": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("market_radar",
+                      "Scan the market for LEADS to dig into: biggest recent movers (price % "
+                      "change), markets near resolution (endgame), and short-history / newly-listed "
+                      "markets. Use for 'what changed today / what's moving / 有什么异动 / 快到期的 / "
+                      "新上市的市场 / 市场雷达 / 从哪找机会'. Surfaces candidates, does not decide.",
+                      frozenset({"question"}), frozenset({"market_radar"}), run, cost=6)
+
+
+def scan_conditional_arb_capability(fn: Callable) -> Capability:
+    """Cross-market conditional / implication arbitrage scanner (pack: conditional-arb).
+    ``fn(query) -> dict`` sweeps the market for entities whose championship market links to
+    lower-stage (reach-final / advance / single-match) markets, computes the implied
+    conditional P(champ|advance), and flags GENUINE logical-implication arbitrage (a
+    stronger claim priced above a weaker one — risk-free, bounded), kept separate from
+    directional conditional value. Computed, honest about what is truly risk-free."""
+    def run(ctx: Context) -> dict:
+        return {"conditional_arb": fn(ctx.facts.get("question") or ctx.facts.get("event"))}
+    return Capability("scan_conditional_arb",
+                      "Scan for cross-market CONDITIONAL / logical-implication arbitrage: link an "
+                      "entity's championship market to its advance-this-round / reach-final / match "
+                      "markets, report P(champ|advance), and flag risk-free implication violations "
+                      "(stronger claim priced above weaker). Use for '找条件概率/跨市场/晋级-夺冠套利', "
+                      "'scan for conditional arbitrage', 'where is champ priced above advancing'.",
+                      frozenset({"question"}), frozenset({"conditional_arb"}), run, cost=5)
+
+
 def plot_market_capability(fn: Callable) -> Capability:
     """Visualize market data as a chart (core, always-on).
 

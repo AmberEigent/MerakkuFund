@@ -22,8 +22,11 @@ from .capabilities import (analyze_market_capability, answer_capability,
                            microstructure_scan_capability, news_sentiment_capability,
                            paper_trade_capability, portfolio_review_capability,
                            settle_and_reflect_capability,
-                           plot_market_capability, relational_alpha_capability,
-                           research_alpha_capability,
+                           log_prediction_capability, market_radar_capability,
+                           news_to_markets_capability,
+                           plot_market_capability, prediction_journal_capability,
+                           relational_alpha_capability,
+                           research_alpha_capability, scan_conditional_arb_capability,
                            promotion_gate_capability, recommend_markets_capability,
                            resolve_market_capability, scan_capability,
                            scan_opportunities_capability, strategy_capability)
@@ -334,10 +337,12 @@ def default_registry() -> list:
     # ones, so its probability must be ≤ theirs (win ⊆ reach final ⊆ reach semi ⊆ advance).
     _STAGE_KW = [
         (("win the", "wins the", "champion", "to win", "winner of"), 4),
-        (("reach the final", "make the final", "in the final", "the final"), 3),
+        (("reach the final", "make the final", "in the final", "the final", "final"), 3),
         (("semifinal", "semi-final", "semi final"), 2),
         (("quarterfinal", "quarter-final", "quarter final"), 1),
-        (("advance", "group stage", "qualify", "round of", "knockout"), 0),
+        # advance-this-round / single-match: the weakest (nearest) claim in the chain
+        (("advance", "group stage", "qualify", "round of", "knockout",
+          "beat", "defeat", " vs ", " vs.", "to advance"), 0),
     ]
 
     def _stage_level(q):
@@ -599,6 +604,256 @@ def default_registry() -> list:
         return {"query": query, "synth": synth, "backtest": bt, "relational": rel,
                 "news_signal": news_sig, "review": review}
 
+    # ----- pack: conditional-arb (cross-market conditional / implication arb scanner) --
+
+    def scan_conditional_arb(query=None, max_show=10):
+        """Scan the market for CONDITIONAL cross-market structures: an entity with a
+        championship market linked to lower-stage (reach-final / advance / single-match)
+        markets. Report the implied P(champ|advance)=P(champ)/P(advance), flag GENUINE
+        logical-implication arbitrage (a stronger claim priced above a weaker one — that
+        is risk-free & bounded), and separate it from directional conditional value."""
+        rows = mcp_server.scan_markets(limit=500, min_volume_24h=0.0)   # wide net: stage markets rank lower
+        ents: dict = {}
+        for r in rows:
+            if r.get("outcome") != "YES":
+                continue
+            q = str(r.get("question", ""))
+            m = re.match(r"will\s+(.+?)\s+(win|reach|advance|make|beat|defeat|qualify|to win|to advance)",
+                         q.lower())
+            if not m:
+                continue
+            ent, lvl = m.group(1).strip(), _stage_level(q)
+            if lvl is None or len(ent) < 2:
+                continue
+            ents.setdefault(ent, []).append({"question": q, "price": round(float(r.get("price") or 0), 4),
+                                              "level": lvl})
+        chains = []
+        for ent, mk in ents.items():
+            staged, seen = [], set()
+            for c in sorted(mk, key=lambda c: -c["level"]):          # keep one market per stage level
+                if c["level"] not in seen:
+                    seen.add(c["level"]); staged.append(c)
+            if len({c["level"] for c in staged}) < 2:                # need ≥2 stages for a conditional
+                continue
+            violations = []                                          # genuine implication arb (risk-free)
+            for i in range(len(staged) - 1):
+                hi, lo = staged[i], staged[i + 1]
+                if hi["price"] > lo["price"] + 0.01:
+                    violations.append({"stronger": hi["question"], "p_strong": hi["price"],
+                                       "weaker": lo["question"], "p_weak": lo["price"],
+                                       "gap": round(hi["price"] - lo["price"], 4)})
+            champ, nxt = staged[0], staged[1]
+            cond = round(champ["price"] / nxt["price"], 4) if nxt["price"] > 0 else None
+            chains.append({"entity": ent, "chain": staged, "violations": violations,
+                           "champ_q": champ["question"], "p_champ": champ["price"],
+                           "advance_q": nxt["question"], "p_advance": nxt["price"],
+                           "cond_champ_given_advance": cond, "has_arb": bool(violations)})
+        chains.sort(key=lambda c: (c["has_arb"], max((v["gap"] for v in c["violations"]), default=0.0)),
+                    reverse=True)
+        return {"query": query, "n_entities": len(ents), "n_chains": len(chains),
+                "n_true_arb": sum(1 for c in chains if c["has_arb"]), "chains": chains[:max_show]}
+
+    # ----- pack: market-radar ("what changed today" — movers / near-resolution / fresh) --
+
+    def _radar_move(token_id, bars=24):
+        """Recent price move + history length (age proxy) for a market token."""
+        c = eng.client.fetch_price_history(token_id, interval="max") or []
+        if len(c) < 2:
+            return {"change": 0.0, "n": len(c), "last": (c[-1].close if c else None)}
+        ref = c[-min(bars, len(c))].close
+        return {"change": round(float(c[-1].close) - float(ref), 4), "n": len(c),
+                "last": round(float(c[-1].close), 4)}
+
+    _WIN_ON_RE = re.compile(r"will\s+(.+?)\s+win\s+on\s+([\d-]+)", re.I)
+    _SCORE_RE = re.compile(r"exact score:\s*(.+?)\s+(\d+)\s*-\s*(\d+)\s+(.+?)\?*$", re.I)
+
+    def _match_consistency(rows):
+        """Computable structural checks on match markets: winner Σ + implied draw/other,
+        and the (partial) exact-score Σ. Σ>1 = genuine overround (sell all → arb)."""
+        winners, matches = {}, {}
+        for r in rows:
+            if r.get("outcome") != "YES":
+                continue
+            q = str(r.get("question", "")); p = float(r.get("price") or 0.0)
+            mw = _WIN_ON_RE.search(q)
+            if mw:
+                winners[mw.group(1).strip().lower()] = {"team": mw.group(1).strip(), "price": round(p, 4)}
+                continue
+            ms = _SCORE_RE.search(q)
+            if ms:
+                a, sa, sb, b = ms.group(1).strip(), int(ms.group(2)), int(ms.group(3)), ms.group(4).strip()
+                key = frozenset((a.lower(), b.lower()))
+                matches.setdefault(key, {"teams": (a, b), "scores": []})["scores"].append(
+                    {"a": sa, "b": sb, "price": round(p, 4)})
+        out = []
+        for mt in matches.values():
+            a, b = mt["teams"]
+            wa, wb = winners.get(a.lower()), winners.get(b.lower())
+            row = {"match": f"{a} vs {b}", "n_scores": len(mt["scores"]),
+                   "exact_sum_partial": round(sum(s["price"] for s in mt["scores"]), 4)}
+            row["exact_overround"] = row["exact_sum_partial"] > 1.01     # subset already >1 → sell all
+            if wa and wb:
+                pa, pb = wa["price"], wb["price"]
+                row.update({"p_a": pa, "p_b": pb, "winner_sum": round(pa + pb, 4),
+                            "implied_draw_other": round(1 - pa - pb, 4),
+                            "winner_overround": (pa + pb) > 1.01})       # sell both winners → arb
+            out.append(row)
+        out.sort(key=lambda r: (r.get("exact_overround") or r.get("winner_overround", False),
+                                r.get("n_scores", 0)), reverse=True)
+        return out
+
+    def market_radar(query=None, scan=100, deep=28, expiry_days=5.0):
+        """Surface leads for a human to dig into: biggest recent movers, markets near
+        resolution, and short-history (possibly newly-listed / thin) markets. Computed
+        from live prices + candle history; no verdicts, just where to look."""
+        rows = mcp_server.scan_markets(limit=scan, min_volume_24h=1000.0)
+        seen, mkts = set(), []
+        for r in rows:                                      # dedup by market, keep the YES side
+            cid = r.get("condition_id")
+            if r.get("outcome") != "YES" or cid in seen:
+                continue
+            seen.add(cid); mkts.append(r)
+        near = sorted([m for m in mkts if 0 < float(m.get("days_to_expiry") or 999) <= expiry_days],
+                      key=lambda m: float(m.get("days_to_expiry") or 999))[:8]
+        near_out = [{"question": m.get("question"), "price": round(float(m.get("price") or 0), 4),
+                     "days": round(float(m.get("days_to_expiry") or 0), 1),
+                     "liquidity": round(float(m.get("liquidity") or 0)),
+                     "volume_24h": round(float(m.get("volume_24h") or 0))} for m in near]
+        scored = []                                         # movers + freshness need candle history
+        for m in mkts[:deep]:
+            mv = _radar_move(m.get("token_id"))
+            scored.append({"question": m.get("question"), "price": round(float(m.get("price") or 0), 4),
+                           "change": mv["change"], "n_candles": mv["n"],
+                           "volume_24h": round(float(m.get("volume_24h") or 0)),
+                           "days": round(float(m.get("days_to_expiry") or 0), 1)})
+        # independent copies so a market appearing in both lists gets its own section 'why'
+        movers = [dict(s) for s in sorted([s for s in scored if s["n_candles"] >= 2],
+                                          key=lambda s: -abs(s["change"]))[:8]]
+        fresh = [dict(s) for s in sorted([s for s in scored if 2 <= s["n_candles"] <= 30],
+                                         key=lambda s: s["n_candles"])[:6]]
+
+        for m in movers:                                    # deterministic 'why it's worth watching'
+            ch = m["change"]
+            mag = "大幅" if abs(ch) >= 0.05 else "中幅" if abs(ch) >= 0.02 else "小幅"
+            m["why"] = f"近期{mag}{'上涨' if ch > 0 else '下跌'} {ch:+.1%},有新信息在推价 → 查催化剂 / 是否过度反应"
+        for m in near_out:
+            liq = m.get("liquidity") or 0
+            m["why"] = (f"{m.get('days')}天到期,单一事件即定生死;流动性 {liq:,}"
+                        + ("(充足)" if liq > 500000 else "(偏薄,注意滑点)"))
+        for m in fresh:
+            m["why"] = f"仅 {m.get('n_candles')} 个历史点,可能新挂/低活跃 → 定价未必充分,先建立观点"
+
+        structural = _match_consistency(rows)               # computable match Σ / draw / exact-score checks
+
+        insight = None                                      # LLM angle + arbitrage suggestions (grounded)
+        try:
+            import json as _json
+            board = _json.dumps({"movers": movers, "near_resolution": near_out, "fresh": fresh,
+                                 "structural_checks": structural[:6]},
+                                ensure_ascii=False, default=str)[:2600]
+            sys = ("You are a prediction-market scout. Given this radar board (movers / "
+                   "near-resolution / fresh + COMPUTED structural_checks with real numbers), for the "
+                   "3-4 MOST interesting leads say in one line WHY it's worth attention + 1-2 concrete "
+                   "ANGLES to verify. USE the structural_checks numbers: winner_sum (P(A)+P(B)) and "
+                   "implied_draw_other, exact_sum_partial. If winner_overround or exact_overround is "
+                   "true, that IS a genuine sell-all arbitrage — state it with the numbers. Otherwise "
+                   "frame cross-market checks as '值得查'. Only reference markets/prices in the board; "
+                   "never invent numbers. Answer in the user's language, <180 words, concise bullets.")
+            resp = eng._get_llm().invoke([("system", sys), ("user", f"Radar board:\n{board}")])
+            text = getattr(resp, "content", resp)
+            if isinstance(text, list):
+                text = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in text)
+            insight = str(text).strip()
+        except Exception as exc:
+            insight = f"(角度生成失败:{type(exc).__name__};以下为线索表。)"
+
+        return {"query": query, "n_scanned": len(mkts), "n_deep": min(deep, len(mkts)),
+                "movers": movers, "near_resolution": near_out, "fresh": fresh,
+                "structural": structural, "insight": insight}
+
+    # ----- pack: prediction-journal (log your own P, score it after resolution) --
+
+    def log_prediction(query):
+        """Record the user's OWN subjective probability for a market (+ the market price
+        now). Parse the % / decimal from the request, resolve the market, persist to the
+        shared journal (cloud DB when configured)."""
+        q = query or ""
+        pm = re.search(r"(\d+(?:\.\d+)?)\s*%", q)
+        if pm:
+            user_p = float(pm.group(1)) / 100.0
+        else:
+            dm = re.search(r"\b0?\.\d+\b", q)
+            user_p = float(dm.group(0)) if dm else None
+        if user_p is None:
+            return {"error": "没解析到你的概率——请说明,例如「记录我对法国夺冠的预测:30%」或「…0.30」。"}
+        user_p = max(0.01, min(0.99, user_p))
+        clean = re.sub(r"\d+(?:\.\d+)?\s*%|\b0?\.\d+\b", " ", q)      # drop the probability
+        clean = re.sub(r"记录|我对|的预测|我觉得|我认为|我预测|概率(是|为|大概)?|预测|押注?|大概|"
+                       r"log( my)?|prediction|probability|estimate|[:：]", " ", clean, flags=re.I)
+        ref = resolve(clean.strip() or q)                             # resolve the market name only
+        if ref.get("error"):
+            return {"error": ref["error"]}
+        if ref.get("matched_by") == "fallback":                       # don't log a wrong market
+            return {"error": f"没准确匹配到你说的标的(退回到「{ref.get('question')}」),没记录。"
+                             f"请用更贴近市场原名的说法,如「记录我对 France win World Cup 的预测:30%」。"}
+        mk = mcp_server._get_market(ref.get("token_id", ""))
+        market_p = float(mk.price) if mk else float(ref.get("price") or 0.0)
+        try:
+            from polyagents.storage.predictions import PredictionStore
+            store = PredictionStore()
+            store.log(token_id=ref["token_id"], condition_id=(mk.condition_id if mk else ""),
+                      question=ref["question"], category=categorize(ref["question"]),
+                      user_p=user_p, market_p=market_p, note=q[:140])
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
+        return {"logged": {"question": ref["question"], "user_p": round(user_p, 4),
+                           "market_p": round(market_p, 4), "edge_vs_market": round(user_p - market_p, 4),
+                           "matched_by": ref.get("matched_by")}}
+
+    def prediction_journal(query=None):
+        """Show the journal: auto-settle any open calls whose market has resolved (Brier
+        you vs market), list open calls with current edge, and aggregate where your
+        subjective read beats the market (overall + by category)."""
+        try:
+            from polyagents.storage.predictions import PredictionStore
+            store = PredictionStore()
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
+        settled_now = 0
+        for p in store.open():                              # auto-settle resolved markets
+            cid = p.get("condition_id")
+            raw = eng.client.fetch_market_by_condition(cid) if cid else None
+            if not raw or not (raw.get("closed") or raw.get("archived")):
+                continue
+            yes = next((mm for mm in eng.client.to_markets([raw]) if mm.token_id == p["token_id"]), None)
+            if yes is None:
+                continue
+            outcome = 1 if yes.price >= 0.5 else 0
+            store.mark_resolved(p["id"], outcome, round((p["user_p"] - outcome) ** 2, 4),
+                                round((p["market_p"] - outcome) ** 2, 4))
+            settled_now += 1
+        allp = store.all()
+        openp = [{"question": p["question"], "user_p": p["user_p"], "market_p": p["market_p"],
+                  "edge": round((p["user_p"] or 0) - (p["market_p"] or 0), 4),
+                  "created_at": (p["created_at"] or "")[:10]} for p in allp if not p["resolved"]]
+        resolved = [p for p in allp if p["resolved"]]
+        agg, by_cat = None, []
+        if resolved:
+            mbu = sum(p["brier_user"] for p in resolved) / len(resolved)
+            mbm = sum(p["brier_market"] for p in resolved) / len(resolved)
+            hit = sum(1 for p in resolved if (p["user_p"] >= 0.5) == (p["outcome"] == 1)) / len(resolved)
+            agg = {"n_resolved": len(resolved), "brier_user": round(mbu, 4), "brier_market": round(mbm, 4),
+                   "brier_delta": round(mbm - mbu, 4), "beats_market": mbm > mbu, "hit_rate": round(hit, 3)}
+            cats = {}
+            for p in resolved:
+                c = cats.setdefault(p["category"] or "other", {"n": 0, "bu": 0.0, "bm": 0.0})
+                c["n"] += 1; c["bu"] += p["brier_user"]; c["bm"] += p["brier_market"]
+            by_cat = sorted([{"category": k, "n": v["n"],
+                              "brier_delta": round(v["bm"] / v["n"] - v["bu"] / v["n"], 4)}
+                             for k, v in cats.items()], key=lambda x: -x["brier_delta"])
+        return {"query": query, "settled_now": settled_now, "n_open": len(openp),
+                "open": openp[:12], "aggregate": agg, "by_category": by_cat}
+
     # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --
 
     def backfill_outcomes(query, limit=1000):
@@ -725,6 +980,51 @@ def default_registry() -> list:
         signal = "偏多" if mean > 0.1 else ("偏空" if mean < -0.1 else "中性")
         return {"query": query, "enabled": True, "n_items": len(scored),
                 "mean_sentiment": mean, "signal": signal, "items": scored}
+
+    def news_to_markets(query, top=8):
+        """Reverse of news_sentiment: given a NEWS item, find which live Polymarket markets
+        it affects and the likely direction. LLM entity-links the news → candidate markets
+        (deterministic overlap) → LLM rates each market's direction. Event-driven scouting."""
+        term_words = set()
+        for t in _topic_terms(query):                       # LLM entities/keywords from the news
+            term_words |= _words(t)
+        rows = mcp_server.scan_markets(limit=120, min_volume_24h=0.0)
+        scored, seen = [], set()
+        for r in rows:
+            if r.get("outcome") != "YES":
+                continue
+            cid = r.get("condition_id")
+            hits = len(term_words & _words(r.get("question", "")))
+            if hits <= 0 or cid in seen:
+                continue
+            seen.add(cid)
+            scored.append({"question": r.get("question"), "price": round(float(r.get("price") or 0), 4),
+                           "hits": hits})
+        scored.sort(key=lambda s: -s["hits"])
+        candidates = scored[:top]
+        if not candidates:
+            return {"query": query, "terms": sorted(term_words)[:10], "candidates": [],
+                    "note": "没找到明显相关的活跃市场(新闻里的实体没匹配到标的)。"}
+        analysis = None                                     # LLM direction per candidate (grounded)
+        try:
+            import json as _json
+            cand = _json.dumps([{"q": c["question"], "price": c["price"]} for c in candidates],
+                               ensure_ascii=False)
+            sys = ("You map a NEWS item to the prediction markets it affects. Given the news and a "
+                   "list of CANDIDATE markets (with current YES price), for each RELEVANT one give "
+                   "the likely direction for YES — 📈 利好(涨) / 📉 利空(跌) / ❓不确定 — and a one-line "
+                   "why tying the news to that market. Skip clearly irrelevant candidates. Use ONLY "
+                   "the given markets; never invent markets or prices. These are hypotheses to verify, "
+                   "not certainties. Answer in the user's language, concise bullets, <190 words.")
+            resp = eng._get_llm().invoke([("system", sys), ("user", f"News:\n{query}\n\nCandidates:\n{cand}")])
+            text = getattr(resp, "content", resp)
+            if isinstance(text, list):
+                text = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in text)
+            analysis = str(text).strip()
+        except Exception as exc:
+            analysis = f"(方向分析失败:{type(exc).__name__};以下为匹配到的候选市场。)"
+        return {"query": query, "terms": sorted(term_words)[:10],
+                "candidates": candidates, "analysis": analysis}
 
     def microstructure_scan(query, n=10):
         cat = categorize(query or "")
@@ -1129,6 +1429,10 @@ def default_registry() -> list:
         plot_market_capability(plot_market),
         relational_alpha_capability(relational_alpha),
         research_alpha_capability(research_alpha),
+        scan_conditional_arb_capability(scan_conditional_arb),
+        market_radar_capability(market_radar),
+        log_prediction_capability(log_prediction),
+        prediction_journal_capability(prediction_journal),
         backfill_outcomes_capability(backfill_outcomes),
         lab_backtest_capability(lab_backtest),
         evaluate_skill_capability(evaluate_skill),
@@ -1136,6 +1440,7 @@ def default_registry() -> list:
         paper_trade_capability(paper_trade),
         settle_and_reflect_capability(settle_and_reflect),
         news_sentiment_capability(news_sentiment),
+        news_to_markets_capability(news_to_markets),
         microstructure_scan_capability(microstructure_scan),
         resolve_market_capability(resolve),
         analyze_market_capability(analyze_market),

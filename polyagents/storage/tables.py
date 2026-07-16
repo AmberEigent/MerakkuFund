@@ -104,6 +104,18 @@ l1_orderbook = Table(
     PrimaryKeyConstraint("token_id", "ts"),
 )
 
+l1_predictions = Table(
+    table_name("predictions"), metadata,
+    Column("id", Text, primary_key=True),
+    Column("token_id", Text), Column("condition_id", Text),
+    Column("question", Text), Column("category", Text),
+    Column("user_p", Float), Column("market_p", Float), Column("note", Text),
+    Column("created_at", Text),
+    Column("resolved", Integer), Column("outcome", Integer),
+    Column("brier_user", Float), Column("brier_market", Float), Column("settled_at", Text),
+    Index(f"ix_{table_name('predictions')}_resolved", "resolved"),
+)
+
 l1_collections = Table(
     table_name("collections"), metadata,
     Column("token_id", Text), Column("as_of", Text), Column("question", Text),
