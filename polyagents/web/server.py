@@ -1065,36 +1065,37 @@ def _format_alpha_review(a: dict, path: str) -> str:
 
 
 def _format_radar(a: dict, path: str) -> str:
-    """Render the market radar: movers / near-resolution / fresh — leads to dig into."""
+    """Render the market radar: movers / near-resolution / fresh, each with WHY it
+    matters, plus an LLM angle + arbitrage-check section."""
     lines = [f"**市场雷达 · market_radar** · {path}", "",
-             f"_扫了 {a.get('n_scanned')} 个市场(深检 {a.get('n_deep')} 个)· 只给线索,不下结论_"]
+             f"_扫了 {a.get('n_scanned')} 个市场(深检 {a.get('n_deep')} 个)· 每条附「为什么」,末尾给角度/套利建议_"]
+    if a.get("insight"):
+        lines.append("\n**🎯 角度与套利建议(值得查,非保证)**\n")
+        lines.append(a["insight"])
     movers = a.get("movers") or []
     if movers:
         lines.append("\n**① 异动(近期价格变化最大)**")
-        lines.append("\n| 市场 | 现价 | 近期Δ | 24h量 |")
-        lines.append("|---|---|---|---|")
         for m in movers:
-            lines.append(f"| {(m.get('question') or '')[:36]} | {m.get('price')} | "
-                         f"**{m.get('change'):+}** | {m.get('volume_24h'):,} |")
+            lines.append(f"\n- **{(m.get('question') or '')[:44]}** · 现价 {m.get('price')} · "
+                         f"Δ**{m.get('change'):+}** · 24h量 {m.get('volume_24h'):,}")
+            lines.append(f"  　_{m.get('why', '')}_")
     near = a.get("near_resolution") or []
     if near:
         lines.append("\n**② 临近结算(endgame,波动大)**")
-        lines.append("\n| 市场 | 现价 | 到期 | 流动性 |")
-        lines.append("|---|---|---|---|")
         for m in near:
-            lines.append(f"| {(m.get('question') or '')[:36]} | {m.get('price')} | "
-                         f"{m.get('days')}d | {m.get('liquidity'):,} |")
+            lines.append(f"\n- **{(m.get('question') or '')[:44]}** · 现价 {m.get('price')} · "
+                         f"{m.get('days')}天到期")
+            lines.append(f"  　_{m.get('why', '')}_")
     fresh = a.get("fresh") or []
     if fresh:
-        lines.append("\n**③ 短历史(可能新上市 / 低活跃,定价未必充分)**")
-        lines.append("\n| 市场 | 现价 | 历史点数 |")
-        lines.append("|---|---|---|")
+        lines.append("\n**③ 短历史(可能新上市 / 低活跃)**")
         for m in fresh:
-            lines.append(f"| {(m.get('question') or '')[:40]} | {m.get('price')} | {m.get('n_candles')} |")
+            lines.append(f"\n- **{(m.get('question') or '')[:44]}** · 现价 {m.get('price')} · "
+                         f"{m.get('n_candles')} 个历史点")
+            lines.append(f"  　_{m.get('why', '')}_")
     if not (movers or near or fresh):
         lines.append("\n当前没扫到明显线索(市场平静 / 数据不足)。")
-    lines.append("\n_① 异动=有新信息在推价,值得查为什么;② 临近结算=单一事件即定生死,适合有观点时下手;"
-                 "③ 短历史=定价可能还没充分。挑一个深挖 → analyze_market;想验证想法 → research_alpha。_")
+    lines.append("\n_挑一个深挖 → analyze_market;想验证想法/找套利 → research_alpha / scan_conditional_arb。_")
     return "\n".join(lines)
 
 

@@ -686,12 +686,47 @@ def default_registry() -> list:
                            "change": mv["change"], "n_candles": mv["n"],
                            "volume_24h": round(float(m.get("volume_24h") or 0)),
                            "days": round(float(m.get("days_to_expiry") or 0), 1)})
-        movers = sorted([s for s in scored if s["n_candles"] >= 2],
-                        key=lambda s: -abs(s["change"]))[:8]
-        fresh = sorted([s for s in scored if 2 <= s["n_candles"] <= 30],
-                       key=lambda s: s["n_candles"])[:6]
+        # independent copies so a market appearing in both lists gets its own section 'why'
+        movers = [dict(s) for s in sorted([s for s in scored if s["n_candles"] >= 2],
+                                          key=lambda s: -abs(s["change"]))[:8]]
+        fresh = [dict(s) for s in sorted([s for s in scored if 2 <= s["n_candles"] <= 30],
+                                         key=lambda s: s["n_candles"])[:6]]
+
+        for m in movers:                                    # deterministic 'why it's worth watching'
+            ch = m["change"]
+            mag = "大幅" if abs(ch) >= 0.05 else "中幅" if abs(ch) >= 0.02 else "小幅"
+            m["why"] = f"近期{mag}{'上涨' if ch > 0 else '下跌'} {ch:+.1%},有新信息在推价 → 查催化剂 / 是否过度反应"
+        for m in near_out:
+            liq = m.get("liquidity") or 0
+            m["why"] = (f"{m.get('days')}天到期,单一事件即定生死;流动性 {liq:,}"
+                        + ("(充足)" if liq > 500000 else "(偏薄,注意滑点)"))
+        for m in fresh:
+            m["why"] = f"仅 {m.get('n_candles')} 个历史点,可能新挂/低活跃 → 定价未必充分,先建立观点"
+
+        insight = None                                      # LLM angle + arbitrage suggestions (grounded)
+        try:
+            import json as _json
+            board = _json.dumps({"movers": movers, "near_resolution": near_out, "fresh": fresh},
+                                ensure_ascii=False, default=str)[:2400]
+            sys = ("You are a prediction-market scout. Given this radar board (movers / "
+                   "near-resolution / fresh markets with live prices), for the 3-4 MOST "
+                   "interesting leads say in one line WHY it's worth attention, then give 1-2 "
+                   "concrete ANGLES / possible cross-market checks to verify — e.g. do the exact-"
+                   "score markets for a match sum near 1, is a semifinal-winner priced consistently "
+                   "with that team's championship market (champ ≤ advance), match-winner vs draw gap. "
+                   "Only reference markets/prices present in the board; NEVER claim an arbitrage "
+                   "exists unless the given prices show it — frame as '值得查' with the reason. "
+                   "Answer in the user's language, <170 words, concise bullets.")
+            resp = eng._get_llm().invoke([("system", sys), ("user", f"Radar board:\n{board}")])
+            text = getattr(resp, "content", resp)
+            if isinstance(text, list):
+                text = "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in text)
+            insight = str(text).strip()
+        except Exception as exc:
+            insight = f"(角度生成失败:{type(exc).__name__};以下为线索表。)"
+
         return {"query": query, "n_scanned": len(mkts), "n_deep": min(deep, len(mkts)),
-                "movers": movers, "near_resolution": near_out, "fresh": fresh}
+                "movers": movers, "near_resolution": near_out, "fresh": fresh, "insight": insight}
 
     # ----- pack: lab-backtest (label snapshots -> Lab feature-strategy backtest) --
 
