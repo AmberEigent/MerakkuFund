@@ -746,10 +746,29 @@
             <label>Strategy <select id="labMonStrategy"></select></label>
             <label>Limit <select id="labMonLimit"><option>5</option><option selected>10</option><option>20</option></select></label>
             <label>Min volume <input id="labMonVol" value="5000" /></label>
-            <label><input type="checkbox" id="labMonHolds" checked /> include holds</label>
+            <label>Min edge <input id="labMonEdge" value="0.05" /></label>
+            <label><input type="checkbox" id="labMonHolds" /> include holds</label>
             <button class="send" id="labMonRun" onclick="runLabMonitor()">▶ Scan dry-run</button>
           </div>
-          <div id="labMonitorResult"><div class="hist">扫描活跃市场，输出 dry_run=true 的 candidate 或 no opportunity，不触发下单。</div></div>
+          <div id="labMonitorResult"><div class="hist">默认只显示 BUY/SELL actionable candidates；勾选 include holds 才展示 HOLD 诊断行。不触发下单。</div></div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-h"><span>Manual trade ticket · live validation log</span><span class="mut">manual execution only · max $20</span></div>
+          <div class="st-controls" style="margin-bottom:12px">
+            <label>Question <input id="ticketQuestion" placeholder="prefilled from monitor" /></label>
+            <label>Token id <input id="ticketToken" placeholder="market token id" /></label>
+            <label>Side <select id="ticketSide"><option value="buy">buy</option><option value="sell">sell</option></select></label>
+            <label>Size USDC <input id="ticketSize" value="10" /></label>
+            <label>Entry price <input id="ticketEntry" placeholder="actual fill, 0-1" /></label>
+            <label>Max entry <input id="ticketMaxEntry" placeholder="trigger cap, 0-1" /></label>
+            <label>Report id <input id="ticketReport" placeholder="eval_..." /></label>
+            <label>URL <input id="ticketUrl" placeholder="Polymarket URL" /></label>
+            <button class="send" id="ticketSave" onclick="saveManualTradeTicket()">Save ticket</button>
+          </div>
+          <label style="display:block;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px">Notes</label>
+          <textarea id="ticketNotes" rows="2" placeholder="why entered / screenshot path / operator note" style="width:100%;margin-top:6px"></textarea>
+          <div id="ticketResult"><div class="hist">从 monitor 的 BUY 行点 ticket 可自动填入信号信息；实际下单仍需人工在 Polymarket 确认价格。</div></div>
         </div>
 
         <div class="panel" style="margin-top:16px">
@@ -1419,7 +1438,7 @@ async function loadEval(){
 
 // ---- Lab: hypothesis-centric sandbox (Lab API + SQLite evidence) ----
 let labHypos = [], labSelId = null, labDetails = {}, labReports = {};
-let labDataStatus = null;
+let labDataStatus = null, labLastMonitor = null, labTicketSignal = null;
 const LAB_STRATEGIES = [
   ['linear-factor-v1','linear-factor-v1 · default','综合 sentiment / flow / book / momentum 的确定性因子模型。'],
   ['market-naive-v1','market-naive-v1 · baseline','直接相信市场价格，用作所有策略的 baseline。'],
@@ -1869,6 +1888,7 @@ async function runLabMonitor(){
       strategy_id:document.getElementById('labMonStrategy').value,
       limit:+(document.getElementById('labMonLimit').value||10),
       min_volume_24h:+(document.getElementById('labMonVol').value||0),
+      min_edge:+(document.getElementById('labMonEdge').value||0),
       include_holds:document.getElementById('labMonHolds').checked,
     };
     const r=await labFetchJson('/api/lab/monitor/opportunities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -1879,14 +1899,16 @@ async function runLabMonitor(){
 function renderLabMonitor(r){
   const out=document.getElementById('labMonitorResult');
   const opps=r.opportunities||[];
+  labLastMonitor = r;
   if(!opps.length){
     out.innerHTML=`<div class="next-hint">dry_run=true · ${esc(r.message||'no opportunity')} · errors=${(r.errors||[]).length}<br>No opportunity means the selected strategy and deterministic risk gate did not find an edge above threshold in the scanned active markets; it is a valid scan result, not a failed backtest.</div>`;
     return;
   }
   out.innerHTML=
-    `<div class="hist">strategy=${esc(r.strategy_id)} · dry_run=${r.dry_run===true} · candidates=${opps.length}</div>`+
-    `<table class="mkt"><thead><tr><th>Market</th><th>Action</th><th>p_cal</th><th>Price</th><th>Edge</th><th>APY</th><th>Size</th><th>Dry-run</th></tr></thead><tbody>`+
-    opps.map(o=>`<tr>
+    `<div class="hist">strategy=${esc(r.strategy_id)} · dry_run=${r.dry_run===true} · actionable=${r.actionable_n??opps.filter(o=>o.action==='buy'||o.action==='sell').length} · holds=${r.hold_n??opps.filter(o=>o.action==='hold').length} · shown=${opps.length}</div>`+
+    `<div class="next-hint">Only BUY/SELL rows with size &gt; $0 are trade candidates. HOLD rows mean edge/risk gates did not approve a manual entry.</div>`+
+    `<table class="mkt"><thead><tr><th>Market</th><th>Action</th><th>p_cal</th><th>Price</th><th>Edge</th><th>APY</th><th>Size</th><th>Dry-run</th><th>Ticket</th></tr></thead><tbody>`+
+    opps.map((o,i)=>`<tr>
       <td>${esc((o.question||o.market_token_id||'').slice(0,72))}</td>
       <td>${o.action==='buy'?'<span class="v-pos">BUY</span>':(o.action==='sell'?'<span class="v-neg">SELL</span>':'HOLD')}</td>
       <td class="mono">${Number(o.p_cal||0).toFixed(3)}</td>
@@ -1895,7 +1917,54 @@ function renderLabMonitor(r){
       <td class="mono">${(Number(o.apy||0)*100).toFixed(0)}%</td>
       <td class="mono">$${fmt(o.size_usdc||0)}</td>
       <td>${o.dry_run===true?'<span class="v-pos">true</span>':'<span class="v-neg">false</span>'}</td>
+      <td>${(o.action==='buy'||o.action==='sell')&&Number(o.size_usdc||0)>0?`<button onclick="prefillTradeTicket(${i})">ticket</button>`:'—'}</td>
     </tr>`).join('')+`</tbody></table>`;
+}
+function prefillTradeTicket(i){
+  const o=(labLastMonitor&&labLastMonitor.opportunities&&labLastMonitor.opportunities[i])||null;
+  if(!o) return;
+  labTicketSignal=o;
+  const maxEntry = o.action==='buy' ? Math.max(0.01, Number(o.p_cal||0)-0.05) : Number(o.market_price||0);
+  document.getElementById('ticketQuestion').value=o.question||'';
+  document.getElementById('ticketToken').value=o.market_token_id||'';
+  document.getElementById('ticketSide').value=o.action==='sell'?'sell':'buy';
+  document.getElementById('ticketSize').value=Math.min(20, Math.max(10, Number(o.size_usdc||10))).toFixed(2);
+  document.getElementById('ticketEntry').value=Number(o.market_price||0).toFixed(3);
+  document.getElementById('ticketMaxEntry').value=maxEntry.toFixed(3);
+  const latestReport=Object.values(labReports).sort((a,b)=>String(b.generated_at||'').localeCompare(String(a.generated_at||'')))[0];
+  document.getElementById('ticketReport').value=(latestReport&&latestReport.id)||'';
+  document.getElementById('ticketNotes').value=`monitor strategy=${o.strategy_id}; p_cal=${Number(o.p_cal||0).toFixed(3)}; price=${Number(o.market_price||0).toFixed(3)}; edge=${Number(o.edge||0).toFixed(3)}; action=${o.action}; dry_run=true`;
+  document.getElementById('ticketResult').innerHTML='<div class="hist">Ticket prefilled. Before saving, confirm the actual Polymarket fill price still satisfies the max entry rule.</div>';
+}
+async function saveManualTradeTicket(){
+  const btn=document.getElementById('ticketSave');
+  const out=document.getElementById('ticketResult');
+  btn.disabled=true; btn.textContent='saving…';
+  try{
+    const o=labTicketSignal||{};
+    const body={
+      signal_source:'lab-monitor',
+      strategy_id:o.strategy_id || document.getElementById('labMonStrategy').value,
+      hypothesis_id:document.getElementById('labBtHypothesis').value || labSelId || '',
+      report_id:document.getElementById('ticketReport').value,
+      p_cal:o.p_cal ?? '',
+      market_price_at_signal:o.market_price ?? '',
+      min_edge:o.edge ?? '',
+      question:document.getElementById('ticketQuestion').value,
+      market_token_id:document.getElementById('ticketToken').value,
+      market_url:document.getElementById('ticketUrl').value,
+      outcome:(o.market&&o.market.outcome)||'YES',
+      category:document.getElementById('labBtCategory').value||'all',
+      side:document.getElementById('ticketSide').value,
+      size_usdc:document.getElementById('ticketSize').value,
+      entry_price:document.getElementById('ticketEntry').value,
+      max_entry_price:document.getElementById('ticketMaxEntry').value,
+      notes:document.getElementById('ticketNotes').value,
+    };
+    const r=await labFetchJson('/api/lab/manual-trade-tickets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    out.innerHTML=`<pre class="evalbox">saved: ${esc(r.path)}\nticket_id: ${esc(r.ticket.ticket_id)}\nsize: $${Number((r.ticket.execution||{}).size_usdc||0).toFixed(2)} · entry=${Number((r.ticket.execution||{}).entry_price||0).toFixed(3)} · auto_execution=false</pre>`;
+  }catch(e){ out.innerHTML='<div class="st-err">⚠ '+esc(e.message||e)+'</div>'; }
+  finally{ btn.disabled=false; btn.textContent='Save ticket'; }
 }
 async function runHistBacktest(){
   const cat=(document.getElementById('labBtCategory') && document.getElementById('labBtCategory').value) || 'all';

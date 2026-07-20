@@ -83,6 +83,7 @@ def test_lab_ui_uses_lab_api_contract():
     assert "Data ingestion · historical settled collections" in html
     assert "Strategy-aware evidence backtest" in html
     assert "Dry-run monitor · active opportunities" in html
+    assert "Manual trade ticket · live validation log" in html
     assert "Reports · EvaluationReport ledger" in html
     assert "Historical replay · resolved price history" in html
     assert "qlib factor backtest · experimental" in html
@@ -121,8 +122,12 @@ def test_lab_ui_uses_lab_api_contract():
     assert "Review order: source" in html
     assert "rerun ingestion/backtest to populate PIT news evidence" in html
     assert "labFetchJson('/api/lab/monitor/opportunities'" in html
+    assert "labFetchJson('/api/lab/manual-trade-tickets'" in html
     assert "dry_run=true" in html
     assert "No opportunity means the selected strategy" in html
+    assert "Only BUY/SELL rows with size" in html
+    assert "function prefillTradeTicket" in html
+    assert "function saveManualTradeTicket" in html
     assert "function labFetchJson" in html
     assert "labFetchJson('/api/lab/hypotheses')" in html
     assert "'/api/lab/hypotheses/'+encodeURIComponent(id)+'/backtests'" in html

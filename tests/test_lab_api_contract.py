@@ -21,6 +21,7 @@ def test_lab_routes_are_registered():
     assert "/api/lab/backtests/{id}" in paths
     assert "/api/lab/reports/{id}" in paths
     assert "/api/lab/monitor/opportunities" in paths
+    assert "/api/lab/manual-trade-tickets" in paths
     assert "/api/lab/system/status" in paths
 
 
@@ -157,6 +158,35 @@ def test_lab_http_monitor_opportunities_is_dry_run(monkeypatch):
     assert body["strategy_id"] == "momentum-v1"
     assert body["opportunities"][0]["dry_run"] is True
     assert body["opportunities"][0]["action"] == "buy"
+
+
+def test_lab_http_manual_trade_ticket_contract(tmp_path, monkeypatch):
+    import polyagents.web.server as server
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(server, "DEFAULT_OUT_DIR", tmp_path)
+    client = TestClient(server.app)
+
+    response = client.post(
+        "/api/lab/manual-trade-tickets",
+        json={
+            "question": "Will Team A win?",
+            "market_token_id": "token-1",
+            "strategy_id": "momentum-v1",
+            "side": "buy",
+            "size_usdc": "10",
+            "entry_price": "0.55",
+            "max_entry_price": "0.57",
+            "report_id": "eval_demo",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ticket"]["mode"] == "manual_live_validation"
+    assert body["ticket"]["risk_limits"]["auto_execution"] is False
+    assert body["ticket"]["execution"]["size_usdc"] == 10
+    assert body["ticket"]["signal"]["report_id"] == "eval_demo"
 
 
 def test_lab_http_data_status_and_ingest_contract(tmp_path, monkeypatch):

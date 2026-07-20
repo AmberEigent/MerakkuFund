@@ -64,6 +64,8 @@ def test_lab_monitor_returns_dry_run_opportunity():
 
     assert result["dry_run"] is True
     assert result["n"] == 1
+    assert result["actionable_n"] in {0, 1}
+    assert result["hold_n"] in {0, 1}
     opp = result["opportunities"][0]
     assert opp["dry_run"] is True
     assert opp["market_token_id"] == "yes-token"
@@ -84,4 +86,4 @@ def test_lab_monitor_can_filter_holds():
 
     assert result["dry_run"] is True
     assert result["opportunities"] == []
-    assert result["message"] == "no opportunity"
+    assert result["message"] == "no actionable opportunity"

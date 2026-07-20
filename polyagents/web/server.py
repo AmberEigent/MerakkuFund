@@ -39,6 +39,7 @@ from polyagents.lab.service import create_hypothesis, default_repository, get_hy
 from polyagents.storage.audit_store import AuditStore
 from polyagents.storage.db import DataStore
 from polyagents.storage.engine import database_url
+from scripts.manual_trade_ticket import DEFAULT_OUT_DIR, build_ticket, write_ticket
 
 from polyagents.runtime.session import AgentSession
 
@@ -385,6 +386,50 @@ async def lab_monitor_opportunities(request: Request) -> JSONResponse:
         return JSONResponse(result)
     except Exception as exc:
         return JSONResponse({"error": {"code": "monitor_failed", "message": str(exc)}}, status_code=400)
+
+
+@app.post("/api/lab/manual-trade-tickets")
+async def lab_manual_trade_ticket(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+        defaults = {
+            "ticket_id": "",
+            "created_at": "",
+            "status": "open",
+            "signal_source": "lab-monitor",
+            "strategy_id": "momentum-v1",
+            "hypothesis_id": "",
+            "report_id": "",
+            "monitor_snapshot": "",
+            "p_cal": "",
+            "market_price_at_signal": "",
+            "min_edge": "",
+            "trigger_rule": "BUY only if current price <= max_entry_price and edge remains positive.",
+            "question": "",
+            "market_url": "",
+            "market_token_id": "",
+            "outcome": "YES",
+            "category": "",
+            "side": "buy",
+            "size_usdc": "10",
+            "entry_price": "",
+            "max_entry_price": "",
+            "executed_at": "",
+            "operator": "",
+            "exit_plan": "Hold until resolution unless edge disappears or price breaches stop.",
+            "stop_price": "",
+            "take_profit_price": "",
+            "exit_price": "",
+            "screenshot_path": "",
+            "notes": "",
+        }
+        args = type("TicketArgs", (), {**defaults, **payload})()
+        ticket = build_ticket(args)
+        path = write_ticket(ticket, DEFAULT_OUT_DIR)
+        _audit_lab("lab.manual_trade_ticket.created", {"ticket_id": ticket["ticket_id"], "path": str(path)})
+        return JSONResponse({"ticket": ticket, "path": str(path)})
+    except Exception as exc:
+        return JSONResponse({"error": {"code": "ticket_failed", "message": str(exc)}}, status_code=400)
 
 
 @app.get("/api/lab/backtests/{id}")

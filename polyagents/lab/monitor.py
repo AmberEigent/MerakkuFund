@@ -253,11 +253,15 @@ class LabMonitor:
             opportunities.append(opp)
 
         opportunities.sort(key=lambda o: (o.action == "buy", o.edge, o.apy), reverse=True)
+        actionable = [o for o in opportunities if o.action in {"buy", "sell"} and o.size_usdc > 0]
+        holds = [o for o in opportunities if o.action == "hold" or o.size_usdc <= 0]
         return {
             "strategy_id": request.strategy_id,
             "dry_run": True,
             "n": len(opportunities),
+            "actionable_n": len(actionable),
+            "hold_n": len(holds),
             "opportunities": [asdict(o) for o in opportunities],
-            "message": "no opportunity" if not opportunities else "ok",
+            "message": "no actionable opportunity" if not actionable else "ok",
             "errors": errors,
         }
