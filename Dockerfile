@@ -18,10 +18,11 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
 COPY polyagents ./polyagents
+COPY scripts ./scripts
 COPY skills ./skills
 COPY README.md ./
 
-RUN mkdir -p /data/.polyagents
+RUN mkdir -p /data/.polyagents /app/storage/manual_trade_tickets
 
 EXPOSE 8000
 
